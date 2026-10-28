@@ -146,6 +146,47 @@ class SapServiceLayerClient(
         return result
     }
 
+    /**
+     * BatchNumberDetails: saldo actual por lote y almacén según Service Layer.
+     * Si SAP no expone WarehouseCode/Quantity en este recurso, falla explícitamente.
+     */
+    fun downloadBatchStock(warehouseCode: String, onProgress: (Int) -> Unit): List<JSONObject> {
+        require(warehouseCode.isNotBlank())
+        val rows = mutableListOf<JSONObject>()
+        val escapedCode = warehouseCode.replace("'", "''")
+        var next: String? = "BatchNumberDetails?\$filter=WarehouseCode eq '${escapedCode}' and Quantity ne 0"
+        val visited = mutableSetOf<String>()
+        while (next != null) {
+            val current = next
+            check(visited.add(current)) { "SAP devolvió una página repetida de lotes" }
+            val url = if (current.startsWith("https://")) current else baseUrl + current.removePrefix("/")
+            require(url.startsWith(baseUrl)) { "Paginación fuera del servidor SAP autorizado" }
+            val page = http.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) throw IllegalStateException("SAP BatchNumberDetails HTTP ${response.code}: ${body.take(200)}")
+                JSONObject(body)
+            }
+            val values = page.getJSONArray("value")
+            for (i in 0 until values.length()) {
+                val batch = values.getJSONObject(i)
+                require(batch.has("WarehouseCode") && batch.has("Quantity") && batch.has("BatchNumber") && batch.has("ItemCode")) {
+                    "SAP no proporciona los campos necesarios para verificar existencia por lote y almacén"
+                }
+                if (batch.getString("WarehouseCode") == warehouseCode && batch.getDouble("Quantity") != 0.0) {
+                    rows.add(JSONObject()
+                        .put("ItemCode", batch.getString("ItemCode"))
+                        .put("BatchNumber", batch.getString("BatchNumber"))
+                        .put("WarehouseCode", warehouseCode)
+                        .put("InStock", batch.getDouble("Quantity")))
+                }
+            }
+            onProgress(rows.size)
+            val nextLink = page.optString("odata.nextLink").ifBlank { page.optString("@odata.nextLink") }
+            next = if (nextLink.isBlank()) null else nextLink.removePrefix(baseUrl).removePrefix("/")
+        }
+        return rows
+    }
+
     fun logout() {
         val request = Request.Builder().url(baseUrl + "Logout")
             .post(ByteArray(0).toRequestBody(null)).build()
