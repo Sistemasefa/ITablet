@@ -47,13 +47,22 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 var user by remember { mutableStateOf("") }
                 var password by remember { mutableStateOf("") }
+                var allowSapCertificate by remember { mutableStateOf(false) }
+                val debugBuild = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("ITablet", style = MaterialTheme.typography.headlineMedium)
                     Text("Acceso SAP Business One")
                     OutlinedTextField(value = user, onValueChange = { user = it }, label = { Text("Usuario SAP") })
                     OutlinedTextField(value = password, onValueChange = { password = it },
                         label = { Text("Contraseña") }, visualTransformation = PasswordVisualTransformation())
-                    Button(onClick = { loginSap(user, password) }, enabled = !sapBusy && user.isNotBlank() && password.isNotBlank()) {
+                    if (debugBuild) {
+                        Text("Advertencia: el certificado SAP está vencido. Autorizarlo solo para esta prueba permite enviar credenciales a un destino cuya identidad se comprueba por huella SHA-256, pero sin validar vigencia ni emisor. No usar en producción.")
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Checkbox(checked = allowSapCertificate, onCheckedChange = { allowSapCertificate = it })
+                            Text("Confío en este certificado SAP para la prueba")
+                        }
+                    }
+                    Button(onClick = { loginSap(user, password, allowSapCertificate) }, enabled = !sapBusy && user.isNotBlank() && password.isNotBlank()) {
                         Text(if (sapBusy) "Conectando..." else "Ingresar SAP")
                     }
                     Text(sapStatus)
@@ -73,13 +82,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun loginSap(user: String, password: String) {
+    private fun loginSap(user: String, password: String, allowPinnedExpiredCertificate: Boolean) {
         if (sapBusy) return
         sapBusy = true
         sapStatus = "Conectando con SAP..."
         Thread {
             try {
-                val client = SapServiceLayerClient()
+                val client = SapServiceLayerClient(context = applicationContext, allowPinnedExpiredCertificate = allowPinnedExpiredCertificate)
                 client.login("AlimentosEFA", user, password)
                 val warehouses = client.getWarehouses()
                 val count = org.json.JSONObject(warehouses).optJSONArray("value")?.length() ?: 0
