@@ -34,6 +34,10 @@ class MainActivity : ComponentActivity() {
     private var sapWarehouses by mutableStateOf<List<SapWarehouse>>(emptyList())
     private var selectedWarehouseCode by mutableStateOf<String?>(null)
     private var confirmedWarehouseCode by mutableStateOf<String?>(null)
+    private var activeSapClient: SapServiceLayerClient? = null
+    private var downloadBusy by mutableStateOf(false)
+    private var downloadStatus by mutableStateOf("")
+    private var downloadedStock by mutableStateOf<List<org.json.JSONObject>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,6 +63,19 @@ class MainActivity : ComponentActivity() {
                 val debugBuild = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("ITablet", style = MaterialTheme.typography.headlineMedium)
+                    if (confirmedWarehouseCode != null) {
+                        val code = confirmedWarehouseCode!!
+                        val warehouse = sapWarehouses.firstOrNull { it.code == code }
+                        Text("Descarga de inventario SAP", style = MaterialTheme.typography.titleLarge)
+                        Text("Almacén: $code — ${warehouse?.description.orEmpty()}")
+                        if (downloadBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text(downloadStatus)
+                        if (!downloadBusy && downloadedStock.isNotEmpty()) {
+                            Text("Artículos con existencia: ${downloadedStock.size}")
+                            Text("La descarga por lote y el guardado local aún están pendientes.")
+                        }
+                        return@Column
+                    }
                     if (sapWarehouses.isNotEmpty()) {
                         Text("Seleccionar almacén SAP", style = MaterialTheme.typography.titleLarge)
                         Text("Selecciona un solo almacén para esta toma de inventario.")
@@ -77,7 +94,7 @@ class MainActivity : ComponentActivity() {
                                 HorizontalDivider()
                             }
                         }
-                        Button(onClick = { confirmedWarehouseCode = selectedWarehouseCode }, enabled = selectedWarehouseCode != null) {
+                        Button(onClick = { selectedWarehouseCode?.let { code -> confirmedWarehouseCode = code; downloadInventory(code) } }, enabled = selectedWarehouseCode != null) {
                             Text("Confirmar almacén")
                         }
                         confirmedWarehouseCode?.let { code ->
@@ -139,7 +156,7 @@ class MainActivity : ComponentActivity() {
                     sapWarehouses = loaded
                     sapStatus = "Conexión SAP correcta. Almacenes disponibles: ${loaded.size}"
                 }
-                client.logout()
+                activeSapClient = client
             } catch (e: Exception) {
                 val message = if (e is SSLHandshakeException ||
                     e.cause is java.security.cert.CertificateException ||
@@ -151,6 +168,35 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread { sapStatus = message }
             } finally {
                 runOnUiThread { sapBusy = false }
+            }
+        }.start()
+    }
+
+    private fun downloadInventory(warehouseCode: String) {
+        if (downloadBusy) return
+        val client = activeSapClient
+        if (client == null) {
+            downloadStatus = "La sesión SAP no está disponible. Vuelve a iniciar sesión."
+            return
+        }
+        downloadBusy = true
+        downloadedStock = emptyList()
+        downloadStatus = "Consultando artículos y existencias en SAP..."
+        Thread {
+            try {
+                val stock = client.downloadWarehouseStock(warehouseCode) { count ->
+                    runOnUiThread { downloadStatus = "Descargando... $count artículos con existencia" }
+                }
+                runOnUiThread {
+                    downloadedStock = stock
+                    downloadStatus = "Descarga de existencias por artículo finalizada: ${stock.size} registros. Pendiente detalle por lote."
+                }
+            } catch (e: Exception) {
+                runOnUiThread { downloadStatus = "Error de descarga SAP: ${e.message?.take(180) ?: e.javaClass.simpleName}" }
+            } finally {
+                try { client.logout() } catch (_: Exception) {}
+                activeSapClient = null
+                runOnUiThread { downloadBusy = false }
             }
         }.start()
     }
