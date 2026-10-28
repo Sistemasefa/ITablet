@@ -6,18 +6,63 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.net.CookieManager
 import java.net.CookiePolicy
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
+import android.content.Context
+import android.content.pm.ApplicationInfo
 
 /**
  * Direct SAP B1 Service Layer client. Call on background dispatcher.
  * TLS uses Android system trust and hostname verification, never trust-all.
  */
 class SapServiceLayerClient(
-    private val baseUrl: String = "https://192.168.1.99:50000/b1s/v1/"
+    private val baseUrl: String = "https://192.168.1.99:50000/b1s/v1/",
+    private val context: Context? = null,
+    private val allowPinnedExpiredCertificate: Boolean = false
 ) {
     private val cookieManager = CookieManager(null, CookiePolicy.ACCEPT_ORIGINAL_SERVER)
-    private val http = OkHttpClient.Builder()
+    private val http: OkHttpClient = OkHttpClient.Builder()
         .cookieJar(JavaNetCookieJar(cookieManager))
+        .apply {
+            if (allowPinnedExpiredCertificate) {
+                // Explicit user opt-in, debug build only. Not a general trust-all.
+                require(context != null && (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                    "La excepción TLS solo está disponible en compilaciones de depuración"
+                }
+                require(baseUrl == "https://192.168.1.99:50000/b1s/v1/") {
+                    "La excepción TLS está limitada al servidor SAP autorizado"
+                }
+                val trustManager = object : X509TrustManager {
+                    override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+                    override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {
+                        throw java.security.cert.CertificateException("No se aceptan certificados de cliente")
+                    }
+                    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                        val leaf = chain.firstOrNull()
+                            ?: throw java.security.cert.CertificateException("Sin certificado de servidor")
+                        val actual = MessageDigest.getInstance("SHA-256")
+                            .digest(leaf.encoded).joinToString(":") { "%02X".format(it) }
+                        if (actual != PINNED_CERT_SHA256) {
+                            throw java.security.cert.CertificateException("Certificado SAP distinto del autorizado")
+                        }
+                        // OkHttp still checks the hostname/IP against certificate SAN.
+                        // This exact-certificate exception does not check expiration or CA trust.
+                    }
+                }
+                val ssl = SSLContext.getInstance("TLS")
+                ssl.init(null, arrayOf(trustManager), SecureRandom())
+                sslSocketFactory(ssl.socketFactory, trustManager)
+            }
+        }
         .build()
+
+    companion object {
+        private const val PINNED_CERT_SHA256 =
+            "76:C5:76:E0:40:87:B3:A5:97:98:0B:94:13:1E:8D:BB:B6:1F:44:A9:C0:61:27:DC:CF:C7:D4:B1:DC:2E:98:C2"
+    }
 
     fun login(companyDb: String, username: String, password: String) {
         require(companyDb.isNotBlank() && username.isNotBlank() && password.isNotBlank())
