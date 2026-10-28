@@ -88,6 +88,51 @@ class SapServiceLayerClient(
         }
     }
 
+    /**
+     * Consulta paginada de existencias por artículo/almacén.
+     * No sustituye la consulta posterior de lotes.
+     */
+    fun downloadWarehouseStock(warehouseCode: String, onProgress: (Int) -> Unit): List<JSONObject> {
+        require(warehouseCode.isNotBlank())
+        val result = mutableListOf<JSONObject>()
+        var next: String? = "Items?\$select=ItemCode,ItemName,ItemWarehouseInfoCollection"
+        val visited = mutableSetOf<String>()
+        while (next != null) {
+            val current = next
+            check(visited.add(current)) { "SAP devolvió una página repetida" }
+            val url = if (current.startsWith("https://")) current else baseUrl + current.removePrefix("/")
+            require(url.startsWith(baseUrl)) { "Paginación fuera del servidor SAP autorizado" }
+            val request = Request.Builder().url(url).get().build()
+            val page = http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw IllegalStateException("SAP Items: HTTP ${response.code}")
+                JSONObject(response.body?.string() ?: error("Respuesta vacía de SAP"))
+            }
+            val values = page.getJSONArray("value")
+            for (i in 0 until values.length()) {
+                val item = values.getJSONObject(i)
+                val warehouses = item.optJSONArray("ItemWarehouseInfoCollection") ?: continue
+                for (j in 0 until warehouses.length()) {
+                    val stock = warehouses.getJSONObject(j)
+                    if (stock.optString("WarehouseCode") == warehouseCode) {
+                        val quantity = stock.optDouble("InStock", 0.0)
+                        if (quantity != 0.0) {
+                            result.add(JSONObject()
+                                .put("ItemCode", item.optString("ItemCode"))
+                                .put("ItemName", item.optString("ItemName"))
+                                .put("WarehouseCode", warehouseCode)
+                                .put("InStock", quantity))
+                        }
+                    }
+                }
+            }
+            onProgress(result.size)
+            val nextLink = page.optString("odata.nextLink")
+                .ifBlank { page.optString("@odata.nextLink") }
+            next = if (nextLink.isBlank()) null else nextLink.removePrefix(baseUrl).removePrefix("/")
+        }
+        return result
+    }
+
     fun logout() {
         val request = Request.Builder().url(baseUrl + "Logout")
             .post(ByteArray(0).toRequestBody(null)).build()
