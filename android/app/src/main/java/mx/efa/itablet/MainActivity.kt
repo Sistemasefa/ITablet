@@ -16,12 +16,16 @@ import com.microsoft.identity.client.IPublicClientApplication
 import com.microsoft.identity.client.IMultipleAccountPublicClientApplication
 import com.microsoft.identity.client.exception.MsalException
 import mx.efa.itablet.integration.EntraConfig
+import mx.efa.itablet.integration.SapServiceLayerClient
+import javax.net.ssl.SSLHandshakeException
 
 class MainActivity : ComponentActivity() {
     private var msalApp: IMultipleAccountPublicClientApplication? = null
     private var msalStatus by mutableStateOf("Inicializando Microsoft 365...")
     private var signedInAccount by mutableStateOf<String?>(null)
     private var msalBusy by mutableStateOf(false)
+    private var sapBusy by mutableStateOf(false)
+    private var sapStatus by mutableStateOf("Sin conectar a SAP")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,9 +53,10 @@ class MainActivity : ComponentActivity() {
                     OutlinedTextField(value = user, onValueChange = { user = it }, label = { Text("Usuario SAP") })
                     OutlinedTextField(value = password, onValueChange = { password = it },
                         label = { Text("Contraseña") }, visualTransformation = PasswordVisualTransformation())
-                    Button(onClick = { /* Pendiente: autenticar contra Service Layer */ }, enabled = false) {
-                        Text("Ingresar SAP (próximamente)")
+                    Button(onClick = { loginSap(user, password) }, enabled = !sapBusy && user.isNotBlank() && password.isNotBlank()) {
+                        Text(if (sapBusy) "Conectando..." else "Ingresar SAP")
                     }
+                    Text(sapStatus)
                     HorizontalDivider()
                     Text("Microsoft 365", style = MaterialTheme.typography.titleMedium)
                     Text(msalStatus)
@@ -66,6 +71,33 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun loginSap(user: String, password: String) {
+        if (sapBusy) return
+        sapBusy = true
+        sapStatus = "Conectando con SAP..."
+        Thread {
+            try {
+                val client = SapServiceLayerClient()
+                client.login("AlimentosEFA", user, password)
+                val warehouses = client.getWarehouses()
+                val count = org.json.JSONObject(warehouses).optJSONArray("value")?.length() ?: 0
+                runOnUiThread { sapStatus = "Conexión SAP correcta. Almacenes disponibles: $count" }
+                client.logout()
+            } catch (e: Exception) {
+                val message = if (e is SSLHandshakeException ||
+                    e.cause is java.security.cert.CertificateException ||
+                    e.message?.contains("certificate", ignoreCase = true) == true) {
+                    "No se pudo validar el certificado HTTPS de SAP."
+                } else {
+                    "Error de conexión SAP: ${e.javaClass.simpleName}: ${e.message?.take(120) ?: "sin detalle"}"
+                }
+                runOnUiThread { sapStatus = message }
+            } finally {
+                runOnUiThread { sapBusy = false }
+            }
+        }.start()
     }
 
     private fun signInMicrosoft() {
