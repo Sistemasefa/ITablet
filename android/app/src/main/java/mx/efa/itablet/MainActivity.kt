@@ -4,6 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -19,6 +22,8 @@ import mx.efa.itablet.integration.EntraConfig
 import mx.efa.itablet.integration.SapServiceLayerClient
 import javax.net.ssl.SSLHandshakeException
 
+data class SapWarehouse(val code: String, val description: String)
+
 class MainActivity : ComponentActivity() {
     private var msalApp: IMultipleAccountPublicClientApplication? = null
     private var msalStatus by mutableStateOf("Inicializando Microsoft 365...")
@@ -26,6 +31,9 @@ class MainActivity : ComponentActivity() {
     private var msalBusy by mutableStateOf(false)
     private var sapBusy by mutableStateOf(false)
     private var sapStatus by mutableStateOf("Sin conectar a SAP")
+    private var sapWarehouses by mutableStateOf<List<SapWarehouse>>(emptyList())
+    private var selectedWarehouseCode by mutableStateOf<String?>(null)
+    private var confirmedWarehouseCode by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +59,34 @@ class MainActivity : ComponentActivity() {
                 val debugBuild = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("ITablet", style = MaterialTheme.typography.headlineMedium)
+                    if (sapWarehouses.isNotEmpty()) {
+                        Text("Seleccionar almacén SAP", style = MaterialTheme.typography.titleLarge)
+                        Text("Selecciona un solo almacén para esta toma de inventario.")
+                        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            items(sapWarehouses, key = { it.code }) { warehouse ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { selectedWarehouseCode = warehouse.code }.padding(vertical = 6.dp),
+                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                                ) {
+                                    RadioButton(selected = selectedWarehouseCode == warehouse.code, onClick = { selectedWarehouseCode = warehouse.code })
+                                    Column {
+                                        Text(warehouse.code, style = MaterialTheme.typography.titleMedium)
+                                        Text(warehouse.description)
+                                    }
+                                }
+                                HorizontalDivider()
+                            }
+                        }
+                        Button(onClick = { confirmedWarehouseCode = selectedWarehouseCode }, enabled = selectedWarehouseCode != null) {
+                            Text("Confirmar almacén")
+                        }
+                        confirmedWarehouseCode?.let { code ->
+                            val selected = sapWarehouses.firstOrNull { it.code == code }
+                            Text("Almacén confirmado: $code — ${selected?.description.orEmpty()}")
+                        }
+                        Text("Almacenes disponibles: ${sapWarehouses.size}")
+                        return@Column
+                    }
                     Text("Acceso SAP Business One")
                     OutlinedTextField(value = user, onValueChange = { user = it }, label = { Text("Usuario SAP") })
                     OutlinedTextField(value = password, onValueChange = { password = it },
@@ -62,7 +98,7 @@ class MainActivity : ComponentActivity() {
                             Text("Confío en este certificado SAP para la prueba")
                         }
                     }
-                    Button(onClick = { loginSap(user, password, allowSapCertificate) }, enabled = !sapBusy && user.isNotBlank() && password.isNotBlank()) {
+                    Button(onClick = { loginSap(user, password, allowSapCertificate) { password = "" } }, enabled = !sapBusy && user.isNotBlank() && password.isNotBlank()) {
                         Text(if (sapBusy) "Conectando..." else "Ingresar SAP")
                     }
                     Text(sapStatus)
@@ -82,7 +118,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun loginSap(user: String, password: String, allowPinnedExpiredCertificate: Boolean) {
+    private fun loginSap(user: String, password: String, allowPinnedExpiredCertificate: Boolean, onSuccess: () -> Unit) {
         if (sapBusy) return
         sapBusy = true
         sapStatus = "Conectando con SAP..."
@@ -91,8 +127,18 @@ class MainActivity : ComponentActivity() {
                 val client = SapServiceLayerClient(context = applicationContext, allowPinnedExpiredCertificate = allowPinnedExpiredCertificate)
                 client.login("AlimentosEFA", user, password)
                 val warehouses = client.getWarehouses()
-                val count = org.json.JSONObject(warehouses).optJSONArray("value")?.length() ?: 0
-                runOnUiThread { sapStatus = "Conexión SAP correcta. Almacenes disponibles: $count" }
+                val values = org.json.JSONObject(warehouses).getJSONArray("value")
+                val loaded = (0 until values.length()).map { index ->
+                    val item = values.getJSONObject(index)
+                    SapWarehouse(item.getString("WarehouseCode"), item.optString("WarehouseName"))
+                }.sortedBy { it.code }
+                runOnUiThread {
+                    onSuccess()
+                    selectedWarehouseCode = null
+                    confirmedWarehouseCode = null
+                    sapWarehouses = loaded
+                    sapStatus = "Conexión SAP correcta. Almacenes disponibles: ${loaded.size}"
+                }
                 client.logout()
             } catch (e: Exception) {
                 val message = if (e is SSLHandshakeException ||
