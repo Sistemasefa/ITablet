@@ -79,13 +79,26 @@ class SapServiceLayerClient(
     }
 
     fun getWarehouses(): String {
-        val request = Request.Builder()
-            .url(baseUrl + "Warehouses?\$select=WarehouseCode,WarehouseName")
-            .get().build()
-        http.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IllegalStateException("SAP warehouses failed: HTTP ${response.code}")
-            return response.body?.string() ?: throw IllegalStateException("Empty SAP response")
+        val all = org.json.JSONArray()
+        var next: String? = "Warehouses?\$select=WarehouseCode,WarehouseName"
+        val visited = mutableSetOf<String>()
+        while (next != null) {
+            val current = next
+            check(visited.add(current)) { "SAP devolvió una página repetida de almacenes" }
+            val url = if (current.startsWith("https://")) current else baseUrl + current.removePrefix("/")
+            require(url.startsWith(baseUrl)) { "Paginación fuera del servidor SAP autorizado" }
+            val request = Request.Builder().url(url).get().build()
+            val page = http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw IllegalStateException("SAP warehouses failed: HTTP ${response.code}")
+                JSONObject(response.body?.string() ?: error("Respuesta vacía de almacenes SAP"))
+            }
+            val values = page.getJSONArray("value")
+            for (i in 0 until values.length()) all.put(values.getJSONObject(i))
+            val nextLink = page.optString("odata.nextLink")
+                .ifBlank { page.optString("@odata.nextLink") }
+            next = if (nextLink.isBlank()) null else nextLink.removePrefix(baseUrl).removePrefix("/")
         }
+        return JSONObject().put("value", all).toString()
     }
 
     /**
