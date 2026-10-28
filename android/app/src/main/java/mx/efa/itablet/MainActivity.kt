@@ -9,10 +9,35 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.microsoft.identity.client.AuthenticationCallback
+import com.microsoft.identity.client.IAuthenticationResult
+import com.microsoft.identity.client.IPublicClientApplication
+import com.microsoft.identity.client.IMultipleAccountPublicClientApplication
+import com.microsoft.identity.client.exception.MsalException
+import mx.efa.itablet.integration.EntraConfig
 
 class MainActivity : ComponentActivity() {
+    private var msalApp: IMultipleAccountPublicClientApplication? = null
+    private var msalStatus by mutableStateOf("Inicializando Microsoft 365...")
+    private var signedInAccount by mutableStateOf<String?>(null)
+    private var msalBusy by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        IPublicClientApplication.createMultipleAccountPublicClientApplication(
+            applicationContext,
+            R.raw.msal_config,
+            object : IPublicClientApplication.IMultipleAccountApplicationCreatedListener {
+                override fun onCreated(application: IMultipleAccountPublicClientApplication) {
+                    msalApp = application
+                    msalStatus = "Microsoft 365 listo para iniciar sesión"
+                }
+
+                override fun onError(exception: MsalException) {
+                    msalStatus = "No se pudo inicializar Microsoft 365: ${exception.errorCode}"
+                }
+            }
+        )
         setContent {
             MaterialTheme {
                 var user by remember { mutableStateOf("") }
@@ -24,11 +49,48 @@ class MainActivity : ComponentActivity() {
                     OutlinedTextField(value = password, onValueChange = { password = it },
                         label = { Text("Contraseña") }, visualTransformation = PasswordVisualTransformation())
                     Button(onClick = { /* Pendiente: autenticar contra Service Layer */ }, enabled = false) {
-                        Text("Ingresar (próximamente)")
+                        Text("Ingresar SAP (próximamente)")
                     }
-                    Text("Prototipo inicial. No envía credenciales todavía.")
+                    HorizontalDivider()
+                    Text("Microsoft 365", style = MaterialTheme.typography.titleMedium)
+                    Text(msalStatus)
+                    if (signedInAccount != null) Text("Cuenta: ${signedInAccount}")
+                    Button(
+                        enabled = msalApp != null && !msalBusy,
+                        onClick = { signInMicrosoft() }
+                    ) {
+                        Text(if (msalBusy) "Iniciando sesión..." else "Iniciar sesión Microsoft 365")
+                    }
+                    Text("La prueba solo autentica. No envía correos ni guarda tokens en el código.")
                 }
             }
         }
+    }
+
+    private fun signInMicrosoft() {
+        val app = msalApp ?: return
+        msalBusy = true
+        msalStatus = "Abriendo inicio de sesión..."
+        app.acquireToken(
+            this,
+            arrayOf(EntraConfig.MAIL_SEND_SCOPE, "User.Read"),
+            object : AuthenticationCallback {
+                override fun onSuccess(authenticationResult: IAuthenticationResult) {
+                    signedInAccount = authenticationResult.account.username
+                    msalStatus = "Autenticación Microsoft 365 correcta"
+                    msalBusy = false
+                }
+
+                override fun onError(exception: MsalException) {
+                    msalStatus = "Error de autenticación: ${exception.errorCode}"
+                    msalBusy = false
+                }
+
+                override fun onCancel() {
+                    msalStatus = "Inicio de sesión cancelado"
+                    msalBusy = false
+                }
+            }
+        )
     }
 }
