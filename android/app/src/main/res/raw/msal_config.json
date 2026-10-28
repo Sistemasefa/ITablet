@@ -1,0 +1,16 @@
+{
+  "client_id": "3163b458-4a4e-4d1d-b852-73bcfb831696",
+  "authorization_user_agent": "DEFAULT",
+  "redirect_uri": "msauth://mx.efa.itablet/Sgb4MAzR7Wo125OvBz4Cb3DFPUY%3D",
+  "account_mode": "MULTIPLE",
+  "authorities": [
+    {
+      "type": "AAD",
+      "audience": {
+        "type": "AzureADMyOrg",
+        "tenant_id": "2b42bfa9-1c65-4c99-9718-ae60c5762292"
+      },
+      "default": true
+    }
+  ]
+}
