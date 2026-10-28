@@ -185,11 +185,18 @@ class MainActivity : ComponentActivity() {
         Thread {
             try {
                 val stock = client.downloadWarehouseStock(warehouseCode) { count ->
-                    runOnUiThread { downloadStatus = "Descargando... $count artículos con existencia" }
+                    runOnUiThread { downloadStatus = "Consultando artículos: $count con existencia" }
+                }
+                val names = stock.associate { it.getString("ItemCode") to it.optString("ItemName") }
+                val batches = client.downloadBatchStock(warehouseCode) { count ->
+                    runOnUiThread { downloadStatus = "Consultando lotes con existencia: $count" }
+                }
+                val matched = batches.map { batch ->
+                    JSONObject(batch.toString()).put("ItemName", names[batch.getString("ItemCode")] ?: "")
                 }
                 runOnUiThread {
-                    downloadedStock = stock
-                    downloadStatus = "Descarga de existencias por artículo finalizada: ${stock.size} registros. Pendiente detalle por lote."
+                    downloadedStock = matched
+                    downloadStatus = "Consulta SAP terminada: ${matched.size} lotes con existencia distinta de cero. Sin guardar todavía en el dispositivo."
                 }
             } catch (e: Exception) {
                 runOnUiThread { downloadStatus = "Error de descarga SAP: ${e.message?.take(180) ?: e.javaClass.simpleName}" }
