@@ -80,7 +80,7 @@ class SapServiceLayerClient(
 
     fun getWarehouses(): String {
         val all = org.json.JSONArray()
-        var next: String? = "Warehouses?\$select=WarehouseCode,WarehouseName"
+        var next: String? = "Warehouses?\$select=WarehouseCode,WarehouseName,Inactive&\$filter=Inactive eq 'tNO'"
         val visited = mutableSetOf<String>()
         while (next != null) {
             val current = next
@@ -108,7 +108,7 @@ class SapServiceLayerClient(
     fun downloadWarehouseStock(warehouseCode: String, onProgress: (Int) -> Unit): List<JSONObject> {
         require(warehouseCode.isNotBlank())
         val result = mutableListOf<JSONObject>()
-        var next: String? = "Items?\$select=ItemCode,ItemName,ItemWarehouseInfoCollection"
+        var next: String? = "Items?\$select=ItemCode,ItemName,ItemWarehouseInfoCollection&\$filter=startswith(ItemCode,'PT') and Valid eq 'tYES' and Frozen eq 'tNO'"
         val visited = mutableSetOf<String>()
         while (next != null) {
             val current = next
@@ -154,7 +154,7 @@ class SapServiceLayerClient(
         require(warehouseCode.isNotBlank())
         val rows = mutableListOf<JSONObject>()
         val escapedCode = warehouseCode.replace("'", "''")
-        var next: String? = "BatchNumberDetails?\$filter=WarehouseCode eq '${escapedCode}' and Quantity ne 0"
+        var next: String? = "BatchNumberDetails?\$filter=WarehouseCode eq '${escapedCode}' and Quantity ne 0 and startswith(ItemCode,'PT')"
         val visited = mutableSetOf<String>()
         while (next != null) {
             val current = next
