@@ -116,7 +116,9 @@ class MainActivity : ComponentActivity() {
                             OutlinedButton(onClick = { refresh(); screen = "history" }) { Text("Consulta de inventarios anteriores") }
                         }
                         "setup" -> {
-                            Text("Conexiones del dispositivo", style = MaterialTheme.typography.titleLarge)
+                            Text("Configuración inicial de la tablet", style = MaterialTheme.typography.titleLarge)
+                            Text("Primero SAP y Microsoft 365; después, cada inventario solo pide nombre y fotografía.")
+                            Text("SAP: ${if (sapConfigured) "Configurado" else "Pendiente"} · Microsoft 365: ${if (microsoftConfigured) "Configurado" else "Pendiente"}")
                             Text(msalStatus)
                             Button(enabled = msalApp != null, onClick = { signInMicrosoft() }) { Text("Iniciar sesión Microsoft 365") }
                             OutlinedTextField(sapUser, { sapUser = it }, label = { Text("Usuario SAP") })
@@ -125,10 +127,11 @@ class MainActivity : ComponentActivity() {
                                 Row { Checkbox(trustCertificate, { trustCertificate = it }); Text("Aceptar certificado SAP vencido (solo pruebas)") }
                             }
                             Button(enabled = !busy && sapUser.isNotBlank() && sapPassword.isNotBlank(),
-                                onClick = { loginSap(sapUser, sapPassword, trustCertificate) { sapPassword = ""; if (active != null) { screen = "inventory"; download(active!!.warehouse) } else screen = "warehouse" } }) {
+                                onClick = { loginSap(sapUser, sapPassword, trustCertificate) { credentials.saveSap(sapUser, sapPassword, trustCertificate); sapConfigured = true; sapPassword = ""; if (microsoftConfigured) screen = if (active != null) "inventory" else "home" } }) {
                                 Text("Conectar y consultar almacenes")
                             }
                             Text(sapStatus)
+                            Button(enabled = sapConfigured && microsoftConfigured, onClick = { screen = if (active != null) "inventory" else "home" }) { Text("Terminar configuración") }
                         }
                         "warehouse" -> {
                             Text("Seleccionar almacén", style = MaterialTheme.typography.titleLarge)
@@ -240,7 +243,7 @@ class MainActivity : ComponentActivity() {
         val app = msalApp ?: return
         app.acquireToken(this, arrayOf(EntraConfig.MAIL_SEND_SCOPE, "User.Read"),
             object : AuthenticationCallback {
-                override fun onSuccess(result: IAuthenticationResult) { msalStatus = "Microsoft 365: ${result.account.username}" }
+                override fun onSuccess(result: IAuthenticationResult) { msalStatus = "Microsoft 365: ${result.account.username}"; credentials.microsoftConfigured = true; microsoftConfigured = true }
                 override fun onError(exception: MsalException) { msalStatus = "Microsoft 365: ${exception.errorCode}" }
                 override fun onCancel() { msalStatus = "Autenticación cancelada" }
             })
