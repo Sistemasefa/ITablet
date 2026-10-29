@@ -161,7 +161,7 @@ class MainActivity : ComponentActivity() {
                                 Text("Lotes: ${rows.size} · Contados: ${rows.count { it.has("CountedQty") }}")
                                 if (rows.isEmpty()) {
                                     Text("Aún no hay existencias guardadas.")
-                                    Button(enabled = !busy, onClick = { screen = "setup"; status = "Reconecta SAP para descargar el inventario pendiente." }) { Text("Conectar SAP") }
+                                    Button(enabled = !busy, onClick = { loadWarehouses() }) { Text("Conectar SAP") }
                                 }
                                 if (selectedRow == null) {
                                     LazyColumn(Modifier.weight(1f)) {
@@ -239,6 +239,35 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun loadWarehouses() {
+        if (busy) return
+        val saved = credentials.sap()
+        if (saved == null) { screen = "setup"; status = "Configura el acceso SAP"; return }
+        busy = true
+        status = "Consultando almacenes SAP..."
+        Thread {
+            try {
+                val client = SapServiceLayerClient(context = applicationContext,
+                    allowPinnedExpiredCertificate = saved.third)
+                client.login("AlimentosEFA", saved.first, saved.second)
+                val array = JSONObject(client.getWarehouses()).getJSONArray("value")
+                val loaded = (0 until array.length()).map {
+                    val w = array.getJSONObject(it)
+                    SapWarehouse(w.getString("WarehouseCode"), w.optString("WarehouseName"))
+                }
+                sapClient = client
+                runOnUiThread {
+                    warehouses = loaded
+                    screen = if (active != null) "inventory" else "warehouse"
+                    status = "Almacenes disponibles: ${loaded.size}"
+                    if (active != null && rows.isEmpty()) download(active!!.warehouse)
+                }
+            } catch (e: Exception) {
+                runOnUiThread { status = "Error SAP: ${e.message?.take(160)}" }
+            } finally { runOnUiThread { busy = false } }
+        }.start()
+    }
+
     private fun signInMicrosoft() {
         val app = msalApp ?: return
         app.acquireToken(this, arrayOf(EntraConfig.MAIL_SEND_SCOPE, "User.Read"),
