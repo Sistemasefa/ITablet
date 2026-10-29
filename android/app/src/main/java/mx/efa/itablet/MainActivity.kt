@@ -274,6 +274,9 @@ class MainActivity : ComponentActivity() {
                                     Column(Modifier.fillMaxWidth().clickable { selectedHistory = inv; screen = "detail" }.padding(10.dp)) {
                                         Text("${date(inv.finishedAt)} · ${inv.responsible}")
                                         Text("${inv.warehouse} · ${inv.warehouseName}")
+                                        Button(enabled = !busy && msalApp != null, onClick = { sendHistoricalInventory(inv) }) {
+                                            Text("Enviar correo a Francisco")
+                                        }
                                         HorizontalDivider()
                                     }
                                 }
@@ -306,6 +309,43 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun sendHistoricalInventory(inv: InventoryHeader) {
+        if (busy) return
+        val app = msalApp ?: run { status = "Microsoft 365 aún no está listo"; return }
+        busy = true
+        status = "Autenticando Microsoft 365 para enviar inventario ${inv.id}..."
+        app.acquireToken(this, arrayOf(EntraConfig.MAIL_SEND_SCOPE, "User.Read"),
+            object : AuthenticationCallback {
+                override fun onSuccess(result: IAuthenticationResult) {
+                    status = "Preparando Excel y enviando correo..."
+                    Thread {
+                        try {
+                            val saved = store.rows(inv.id)
+                            val xlsx = InventoryExcel.generate(inv, saved)
+                            GraphMailSender().sendXlsx(
+                                result.accessToken,
+                                "francisco.alvirde@alimentosefa.com.mx",
+                                "ITablet · Inventario ${inv.warehouse} · ${date(inv.finishedAt)}",
+                                "ITablet_Inventario_${inv.id}.xlsx",
+                                xlsx
+                            )
+                            runOnUiThread { status = "Microsoft Graph aceptó el envío del inventario ${inv.id} a francisco.alvirde@alimentosefa.com.mx." }
+                        } catch (e: Exception) {
+                            runOnUiThread { status = "No se pudo enviar el inventario: ${e.message?.take(180)}" }
+                        } finally { runOnUiThread { busy = false } }
+                    }.start()
+                }
+                override fun onError(exception: MsalException) {
+                    busy = false
+                    status = "Error de autenticación Microsoft 365: ${exception.errorCode}"
+                }
+                override fun onCancel() {
+                    busy = false
+                    status = "Envío de correo cancelado"
+                }
+            })
+    }
+
     private fun loadWarehouses() {
         if (busy) return
         val saved = credentials.sap()
