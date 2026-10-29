@@ -56,7 +56,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         store = InventoryStore(this)
         refresh()
-        screen = if (active != null) "inventory" else "home"
+        screen = if (active != null) "inventory" else "setup"
         PublicClientApplication.createMultipleAccountPublicClientApplication(
             applicationContext, R.raw.msal_config,
             object : IPublicClientApplication.IMultipleAccountApplicationCreatedListener {
@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
                                 OutlinedTextField(responsible, { responsible = it }, label = { Text("Nombre completo") })
                                 Button(onClick = { camera.launch(null) }) { Text("Tomar fotografía obligatoria") }
                                 Text(if (photoPath.isNotBlank()) "Fotografía capturada" else "Fotografía pendiente")
-                                Button(enabled = responsible.isNotBlank() && photoPath.isNotBlank(), onClick = { screen = "setup" }) {
+                                Button(enabled = responsible.isNotBlank() && photoPath.isNotBlank(), onClick = { screen = "warehouse" }) {
                                     Text("Continuar")
                                 }
                             }
