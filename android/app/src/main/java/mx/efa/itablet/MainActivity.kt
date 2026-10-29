@@ -32,6 +32,9 @@ data class SapWarehouse(val code: String, val description: String)
 
 class MainActivity : ComponentActivity() {
     private lateinit var store: InventoryStore
+    private lateinit var credentials: DeviceCredentials
+    private var sapConfigured by mutableStateOf(false)
+    private var microsoftConfigured by mutableStateOf(false)
     private var active by mutableStateOf<InventoryHeader?>(null)
     private var screen by mutableStateOf("home")
     private var msalApp: IMultipleAccountPublicClientApplication? = null
@@ -55,8 +58,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = InventoryStore(this)
+        credentials = DeviceCredentials(this)
+        sapConfigured = credentials.sap() != null
+        microsoftConfigured = credentials.microsoftConfigured
         refresh()
-        screen = if (active != null) "inventory" else "setup"
+        screen = if (active != null) "inventory" else if (sapConfigured && microsoftConfigured) "home" else "setup"
         PublicClientApplication.createMultipleAccountPublicClientApplication(
             applicationContext, R.raw.msal_config,
             object : IPublicClientApplication.IMultipleAccountApplicationCreatedListener {
@@ -103,7 +109,7 @@ class MainActivity : ComponentActivity() {
                                 OutlinedTextField(responsible, { responsible = it }, label = { Text("Nombre completo") })
                                 Button(onClick = { camera.launch(null) }) { Text("Tomar fotografía obligatoria") }
                                 Text(if (photoPath.isNotBlank()) "Fotografía capturada" else "Fotografía pendiente")
-                                Button(enabled = responsible.isNotBlank() && photoPath.isNotBlank(), onClick = { screen = "warehouse" }) {
+                                Button(enabled = responsible.isNotBlank() && photoPath.isNotBlank(), onClick = { loadWarehouses() }) {
                                     Text("Continuar")
                                 }
                             }
