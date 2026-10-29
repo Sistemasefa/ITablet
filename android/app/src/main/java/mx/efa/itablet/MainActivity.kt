@@ -13,6 +13,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import android.graphics.BitmapFactory
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.microsoft.identity.client.*
@@ -116,7 +119,7 @@ class MainActivity : ComponentActivity() {
                                 Row { Checkbox(trustCertificate, { trustCertificate = it }); Text("Aceptar certificado SAP vencido (solo pruebas)") }
                             }
                             Button(enabled = !busy && sapUser.isNotBlank() && sapPassword.isNotBlank(),
-                                onClick = { loginSap(sapUser, sapPassword, trustCertificate) { sapPassword = ""; screen = "warehouse" } }) {
+                                onClick = { loginSap(sapUser, sapPassword, trustCertificate) { sapPassword = ""; if (active != null) { screen = "inventory"; download(active!!.warehouse) } else screen = "warehouse" } }) {
                                 Text("Conectar y consultar almacenes")
                             }
                             Text(sapStatus)
@@ -205,7 +208,9 @@ class MainActivity : ComponentActivity() {
                             selectedHistory?.let { inv ->
                                 Text("Resumen · Solo lectura", style = MaterialTheme.typography.titleLarge)
                                 Text("Responsable: ${inv.responsible}")
-                                Text("Fotografía registrada: ${if (File(inv.photoPath).exists()) "Sí" else "No disponible"}")
+                                val photo = remember(inv.photoPath) { if (File(inv.photoPath).exists()) BitmapFactory.decodeFile(inv.photoPath)?.asImageBitmap() else null }
+                                if (photo != null) Image(bitmap = photo, contentDescription = "Fotografía del responsable", modifier = Modifier.size(120.dp))
+                                else Text("Fotografía no disponible")
                                 Text("Almacén: ${inv.warehouse} · ${inv.warehouseName}")
                                 Text("Inicio: ${date(inv.startedAt)}")
                                 Text("Fin: ${date(inv.finishedAt)}")
