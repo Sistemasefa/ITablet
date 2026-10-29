@@ -297,7 +297,7 @@ class MainActivity : ComponentActivity() {
                                 Text("Artículos: ${saved.size} · Diferencias: ${saved.count { it.has("CountedQty") && it.optDouble("CountedQty") != it.optDouble("InStock") }}")
                                 LazyColumn(Modifier.weight(1f)) {
                                     items(saved) { row ->
-                                        Text("${row.optString("ItemCode")} · SAP ${row.optDouble("InStock")} · Conteo ${row.optDouble("CountedQty")}")
+                                        Text("${row.optString("ItemCode")} · SAP ${row.optDouble("InStock")} · Conteo ${if (row.has("CountedQty")) row.optDouble("CountedQty").toString() else "Sin contar"}")
                                         HorizontalDivider()
                                     }
                                 }
@@ -309,6 +309,35 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    private fun htmlEscape(value: String): String = value.replace("&", "&amp;")
+        .replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
+    private fun inventoryEmailHtml(inv: InventoryHeader, saved: List<JSONObject>): String {
+        val counted = saved.count { it.has("CountedQty") }
+        val pending = saved.size - counted
+        val differences = saved.count {
+            it.has("CountedQty") && it.optDouble("CountedQty") != it.optDouble("InStock")
+        }
+        val photo = if (File(inv.photoPath).isFile)
+            "<p><img src=\"cid:responsable-itablet\" alt=\"Fotografía del responsable\" width=\"180\" /></p>"
+            else "<p>Fotografía no disponible</p>"
+        return """
+            <html><body style="font-family:Arial,sans-serif;color:#222">
+            <h2>ITablet · AlimentosEFA</h2>
+            <h3>Resumen de inventario · Solo lectura</h3>
+            <p><strong>Responsable:</strong> ${htmlEscape(inv.responsible)}</p>
+            $photo
+            <p><strong>Almacén:</strong> ${htmlEscape(inv.warehouse)} · ${htmlEscape(inv.warehouseName)}</p>
+            <p><strong>Inicio:</strong> ${date(inv.startedAt)}</p>
+            <p><strong>Consulta SAP:</strong> ${date(inv.queryStartedAt)} — ${date(inv.queryFinishedAt)}</p>
+            <p><strong>Finalización:</strong> ${date(inv.finishedAt)}</p>
+            <p><strong>Artículos:</strong> ${saved.size} · <strong>Contados:</strong> $counted ·
+            <strong>Sin contar:</strong> $pending · <strong>Diferencias:</strong> $differences</p>
+            <p>Se adjunta el detalle de artículos y cantidades en formato Excel.</p>
+            </body></html>
+        """.trimIndent()
+    }
+
     private fun sendHistoricalInventory(inv: InventoryHeader) {
         if (busy) return
         val app = msalApp ?: run { status = "Microsoft 365 aún no está listo"; return }
@@ -327,7 +356,9 @@ class MainActivity : ComponentActivity() {
                                 "francisco.alvirde@alimentosefa.com.mx",
                                 "ITablet · Inventario ${inv.warehouse} · ${date(inv.finishedAt)}",
                                 "ITablet_Inventario_${inv.id}.xlsx",
-                                xlsx
+                                xlsx,
+                                inventoryEmailHtml(inv, saved),
+                                File(inv.photoPath).takeIf { it.isFile }?.readBytes()
                             )
                             runOnUiThread { status = "Microsoft Graph aceptó el envío del inventario ${inv.id} a francisco.alvirde@alimentosefa.com.mx." }
                         } catch (e: Exception) {
