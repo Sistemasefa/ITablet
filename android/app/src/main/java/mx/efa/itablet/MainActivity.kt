@@ -41,6 +41,7 @@ class MainActivity : ComponentActivity() {
     private var msalStatus by mutableStateOf("Inicializando Microsoft 365...")
     private var sapStatus by mutableStateOf("SAP sin conectar")
     private var busy by mutableStateOf(false)
+    @Volatile private var cancelDownload = false
     private var warehouses by mutableStateOf<List<SapWarehouse>>(emptyList())
     private var sapClient: SapServiceLayerClient? = null
     private var rows by mutableStateOf<List<JSONObject>>(emptyList())
@@ -160,6 +161,14 @@ class MainActivity : ComponentActivity() {
                                 Text("Inicio: ${date(inv.startedAt)}")
                                 Text("Consulta SAP: ${date(inv.queryStartedAt)} — ${date(inv.queryFinishedAt)}")
                                 Text("Lotes: ${rows.size} · Contados: ${rows.count { it.has("CountedQty") }}")
+                                if (busy && rows.isEmpty()) {
+                                    OutlinedButton(onClick = {
+                                        cancelDownload = true
+                                        sapClient?.cancelRequests()
+                                        screen = "home"
+                                        status = "Descarga cancelada. El inventario permanece pendiente."
+                                    }) { Text("Cancelar descarga y regresar") }
+                                }
                                 if (rows.isEmpty()) {
                                     Text("Aún no hay existencias guardadas.")
                                     Button(enabled = !busy, onClick = { loadWarehouses() }) { Text("Conectar SAP") }
