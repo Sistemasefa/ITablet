@@ -187,6 +187,8 @@ class SapServiceLayerClient(
         return rows
     }
 
+    fun cancelRequests() { http.dispatcher.cancelAll() }
+
     fun logout() {
         val request = Request.Builder().url(baseUrl + "Logout")
             .post(ByteArray(0).toRequestBody(null)).build()
