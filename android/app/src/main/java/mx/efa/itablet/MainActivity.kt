@@ -182,7 +182,7 @@ class MainActivity : ComponentActivity() {
                                                 pieces = if (row.has("Pieces")) row.getDouble("Pieces").toString() else ""
                                             }.padding(8.dp)) {
                                                 Text("${row.optString("ItemCode")} · ${row.optString("ItemName")}")
-                                                Text("Lote: ${row.optString("BatchNumber")} · SAP: ${row.optDouble("InStock")}")
+                                                Text("SAP: ${row.optDouble("InStock")} · Sin desglose por lote")
                                                 Text(if (row.has("CountedQty")) "Contado: ${row.optDouble("CountedQty")} · Piezas: ${row.optDouble("Pieces")}" else "Recontar")
                                                 HorizontalDivider()
                                             }
@@ -196,7 +196,7 @@ class MainActivity : ComponentActivity() {
                                     OutlinedButton(onClick = { screen = "home" }) { Text("Guardar y salir") }
                                 } else {
                                     val row = selectedRow!!
-                                    Text("Recontar ${row.optString("ItemCode")} · Lote ${row.optString("BatchNumber")}")
+                                    Text("Recontar ${row.optString("ItemCode")}")
                                     OutlinedTextField(qty, { qty = it }, label = { Text("Cantidad (kg)") })
                                     OutlinedTextField(pieces, { pieces = it }, label = { Text("Piezas") })
                                     Button(enabled = qty.toDoubleOrNull() != null && pieces.toDoubleOrNull() != null,
@@ -237,7 +237,7 @@ class MainActivity : ComponentActivity() {
                                 Text("Lotes: ${saved.size} · Diferencias: ${saved.count { it.has("CountedQty") && it.optDouble("CountedQty") != it.optDouble("InStock") }}")
                                 LazyColumn(Modifier.weight(1f)) {
                                     items(saved) { row ->
-                                        Text("${row.optString("ItemCode")} · ${row.optString("BatchNumber")} · SAP ${row.optDouble("InStock")} · Conteo ${row.optDouble("CountedQty")}")
+                                        Text("${row.optString("ItemCode")} · SAP ${row.optDouble("InStock")} · Conteo ${row.optDouble("CountedQty")}")
                                         HorizontalDivider()
                                     }
                                 }
@@ -322,15 +322,11 @@ class MainActivity : ComponentActivity() {
                 val stock = client.downloadWarehouseStock(warehouse) { n ->
                     runOnUiThread { status = "Artículos PT con existencia: $n" }
                 }
-                val names = stock.associate { it.getString("ItemCode") to it.optString("ItemName") }
-                val allowed = names.keys
-                val batches = client.downloadBatchStock(warehouse) { n ->
-                    runOnUiThread { status = "Lotes consultados: $n" }
-                }.filter { it.optString("ItemCode") in allowed }
-                    .map { JSONObject(it.toString()).put("ItemName", names[it.getString("ItemCode")] ?: "") }
+                // Etapa 1: una fila por artículo y almacén. El desglose por lote queda pendiente.
+                val items = stock.map { JSONObject(it.toString()).put("BatchNumber", "") }
                 if (cancelDownload) throw InterruptedException("Descarga cancelada")
-                store.saveSnapshot(id, batches, started, System.currentTimeMillis())
-                runOnUiThread { refresh(); if (!cancelDownload) status = "Existencias guardadas localmente: ${batches.size} lotes" }
+                store.saveSnapshot(id, items, started, System.currentTimeMillis())
+                runOnUiThread { refresh(); if (!cancelDownload) status = "Existencias guardadas localmente: ${items.size} artículos (sin desglose por lote)" }
             } catch (e: Exception) {
                 runOnUiThread { status = if (cancelDownload) "Descarga cancelada; inventario pendiente." else "Error SAP: ${e.message?.take(160)}. Inventario pendiente; reintentar conexión." }
             } finally {
