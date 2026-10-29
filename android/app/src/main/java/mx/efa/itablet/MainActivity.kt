@@ -86,6 +86,7 @@ class MainActivity : ComponentActivity() {
                 var trustCertificate by remember { mutableStateOf(false) }
                 var warehouse by remember { mutableStateOf("") }
                 var selectedRow by remember { mutableStateOf<JSONObject?>(null) }
+                var confirmIncompleteFinish by remember { mutableStateOf(false) }
                 var qty by remember { mutableStateOf("") }
                 var pieces by remember { mutableStateOf("") }
                 val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap: Bitmap? ->
@@ -190,14 +191,43 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
                                     }
-                                    if (rows.isNotEmpty() && rows.any { !it.has("CountedQty") }) {
-                                        Text("Para finalizar, cuenta los ${rows.count { !it.has("CountedQty") }} artículos pendientes.", color = MaterialTheme.colorScheme.error)
-                                    }
-                                    Button(enabled = rows.isNotEmpty() && rows.all { it.has("CountedQty") } && !busy,
+                                    Button(enabled = rows.isNotEmpty() && !busy,
                                         onClick = {
-                                            try { store.finish(inv.id); refresh(); screen = "home"; responsible = ""; photoPath = ""; status = "Inventario finalizado y guardado en historial. Envío de correo pendiente." }
-                                            catch (e: Exception) { status = "No se pudo finalizar: ${e.message}" }
+                                            val pending = rows.count { !it.has("CountedQty") }
+                                            if (pending > 0) {
+                                                confirmIncompleteFinish = true
+                                            } else {
+                                                try {
+                                                    store.finish(inv.id)
+                                                    refresh(); screen = "home"; responsible = ""; photoPath = ""
+                                                    status = "Inventario finalizado y guardado en historial. Envío de correo pendiente."
+                                                } catch (e: Exception) { status = "No se pudo finalizar: ${e.message}" }
+                                            }
                                         }) { Text("Finalizar inventario") }
+                                    if (confirmIncompleteFinish) {
+                                        val pending = rows.count { !it.has("CountedQty") }
+                                        AlertDialog(
+                                            onDismissRequest = { confirmIncompleteFinish = false },
+                                            title = { Text("Inventario incompleto") },
+                                            text = { Text("Aún faltan $pending artículos por contar. ¿Deseas finalizar el inventario de todas formas? Los artículos pendientes quedarán sin conteo y no podrás modificarlos después.") },
+                                            confirmButton = {
+                                                TextButton(onClick = {
+                                                    try {
+                                                        store.finish(inv.id, allowIncomplete = true)
+                                                        confirmIncompleteFinish = false
+                                                        refresh(); screen = "home"; responsible = ""; photoPath = ""
+                                                        status = "Inventario incompleto finalizado y guardado en historial. Envío de correo pendiente."
+                                                    } catch (e: Exception) {
+                                                        confirmIncompleteFinish = false
+                                                        status = "No se pudo finalizar: ${e.message}"
+                                                    }
+                                                }) { Text("Sí, finalizar") }
+                                            },
+                                            dismissButton = {
+                                                TextButton(onClick = { confirmIncompleteFinish = false }) { Text("No, seguir contando") }
+                                            }
+                                        )
+                                    }
                                     OutlinedButton(onClick = { screen = "home" }) { Text("Guardar y salir") }
                                 } else {
                                     val row = selectedRow!!
