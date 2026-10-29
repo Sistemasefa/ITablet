@@ -314,6 +314,7 @@ class MainActivity : ComponentActivity() {
         val client = sapClient ?: run { status = "Conecta SAP para descargar"; return }
         val id = active?.id ?: return
         busy = true
+        cancelDownload = false
         val started = System.currentTimeMillis()
         status = "Consultando existencias actuales SAP..."
         Thread {
@@ -327,10 +328,11 @@ class MainActivity : ComponentActivity() {
                     runOnUiThread { status = "Lotes consultados: $n" }
                 }.filter { it.optString("ItemCode") in allowed }
                     .map { JSONObject(it.toString()).put("ItemName", names[it.getString("ItemCode")] ?: "") }
+                if (cancelDownload) throw InterruptedException("Descarga cancelada")
                 store.saveSnapshot(id, batches, started, System.currentTimeMillis())
-                runOnUiThread { refresh(); status = "Existencias guardadas localmente: ${batches.size} lotes" }
+                runOnUiThread { refresh(); if (!cancelDownload) status = "Existencias guardadas localmente: ${batches.size} lotes" }
             } catch (e: Exception) {
-                runOnUiThread { status = "Error SAP: ${e.message?.take(160)}. Inventario pendiente; reintentar conexión." }
+                runOnUiThread { status = if (cancelDownload) "Descarga cancelada; inventario pendiente." else "Error SAP: ${e.message?.take(160)}. Inventario pendiente; reintentar conexión." }
             } finally {
                 try { client.logout() } catch (_: Exception) {}
                 sapClient = null
