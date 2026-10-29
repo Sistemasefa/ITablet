@@ -1,238 +1,288 @@
 package mx.efa.itablet
 
+import android.graphics.Bitmap
 import android.os.Bundle
-import org.json.JSONObject
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.microsoft.identity.client.AuthenticationCallback
-import com.microsoft.identity.client.IAuthenticationResult
-import com.microsoft.identity.client.PublicClientApplication
-import com.microsoft.identity.client.IPublicClientApplication
-import com.microsoft.identity.client.IMultipleAccountPublicClientApplication
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.microsoft.identity.client.*
 import com.microsoft.identity.client.exception.MsalException
-import mx.efa.itablet.integration.EntraConfig
-import mx.efa.itablet.integration.SapServiceLayerClient
-import javax.net.ssl.SSLHandshakeException
+import mx.efa.itablet.data.*
+import mx.efa.itablet.integration.*
+import org.json.JSONObject
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class SapWarehouse(val code: String, val description: String)
 
 class MainActivity : ComponentActivity() {
+    private lateinit var store: InventoryStore
+    private var active by mutableStateOf<InventoryHeader?>(null)
+    private var screen by mutableStateOf("home")
     private var msalApp: IMultipleAccountPublicClientApplication? = null
     private var msalStatus by mutableStateOf("Inicializando Microsoft 365...")
-    private var signedInAccount by mutableStateOf<String?>(null)
-    private var msalBusy by mutableStateOf(false)
-    private var sapBusy by mutableStateOf(false)
-    private var sapStatus by mutableStateOf("Sin conectar a SAP")
-    private var sapWarehouses by mutableStateOf<List<SapWarehouse>>(emptyList())
-    private var selectedWarehouseCode by mutableStateOf<String?>(null)
-    private var confirmedWarehouseCode by mutableStateOf<String?>(null)
-    private var activeSapClient: SapServiceLayerClient? = null
-    private var downloadBusy by mutableStateOf(false)
-    private var downloadStatus by mutableStateOf("")
-    private var downloadedStock by mutableStateOf<List<org.json.JSONObject>>(emptyList())
-
+    private var sapStatus by mutableStateOf("SAP sin conectar")
+    private var busy by mutableStateOf(false)
+    private var warehouses by mutableStateOf<List<SapWarehouse>>(emptyList())
+    private var sapClient: SapServiceLayerClient? = null
+    private var rows by mutableStateOf<List<JSONObject>>(emptyList())
+    private var history by mutableStateOf<List<InventoryHeader>>(emptyList())
+    private var selectedHistory by mutableStateOf<InventoryHeader?>(null)
+    private var status by mutableStateOf("")
+    private fun refresh() {
+        active = store.active()
+        rows = active?.let { store.rows(it.id) } ?: emptyList()
+        history = store.history()
+    }
+    private fun date(value: Long?): String = value?.let {
+        SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date(it))
+    } ?: "—"
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        store = InventoryStore(this)
+        refresh()
+        screen = if (active != null) "inventory" else "home"
         PublicClientApplication.createMultipleAccountPublicClientApplication(
-            applicationContext,
-            R.raw.msal_config,
+            applicationContext, R.raw.msal_config,
             object : IPublicClientApplication.IMultipleAccountApplicationCreatedListener {
                 override fun onCreated(application: IMultipleAccountPublicClientApplication) {
                     msalApp = application
-                    msalStatus = "Microsoft 365 listo para iniciar sesión"
+                    msalStatus = "Microsoft 365 listo"
                 }
-
                 override fun onError(exception: MsalException) {
-                    msalStatus = "No se pudo inicializar Microsoft 365: ${exception.errorCode}"
+                    msalStatus = "Microsoft 365: ${exception.errorCode}"
                 }
-            }
-        )
+            })
         setContent {
             MaterialTheme {
-                var user by remember { mutableStateOf("") }
-                var password by remember { mutableStateOf("") }
-                var allowSapCertificate by remember { mutableStateOf(false) }
-                val debugBuild = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-                Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("ITablet", style = MaterialTheme.typography.headlineMedium)
-                    if (confirmedWarehouseCode != null) {
-                        val code = confirmedWarehouseCode!!
-                        val warehouse = sapWarehouses.firstOrNull { it.code == code }
-                        Text("Descarga de inventario SAP", style = MaterialTheme.typography.titleLarge)
-                        Text("Almacén: $code — ${warehouse?.description.orEmpty()}")
-                        if (downloadBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        Text(downloadStatus)
-                        if (!downloadBusy && downloadedStock.isNotEmpty()) {
-                            Text("Artículos con existencia: ${downloadedStock.size}")
-                            Text("La descarga por lote y el guardado local aún están pendientes.")
-                        }
-                        return@Column
+                var responsible by remember { mutableStateOf("") }
+                var photoPath by remember { mutableStateOf("") }
+                var sapUser by remember { mutableStateOf("") }
+                var sapPassword by remember { mutableStateOf("") }
+                var trustCertificate by remember { mutableStateOf(false) }
+                var warehouse by remember { mutableStateOf("") }
+                var selectedRow by remember { mutableStateOf<JSONObject?>(null) }
+                var qty by remember { mutableStateOf("") }
+                var pieces by remember { mutableStateOf("") }
+                val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap: Bitmap? ->
+                    if (bitmap != null) {
+                        val file = File(filesDir, "responsible_${System.currentTimeMillis()}.jpg")
+                        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+                        photoPath = file.absolutePath
                     }
-                    if (sapWarehouses.isNotEmpty()) {
-                        Text("Seleccionar almacén SAP", style = MaterialTheme.typography.titleLarge)
-                        Text("Selecciona un solo almacén para esta toma de inventario.")
-                        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(sapWarehouses, key = { it.code }) { warehouse ->
-                                Row(
-                                    Modifier.fillMaxWidth().clickable { selectedWarehouseCode = warehouse.code }.padding(vertical = 6.dp),
-                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                                ) {
-                                    RadioButton(selected = selectedWarehouseCode == warehouse.code, onClick = { selectedWarehouseCode = warehouse.code })
-                                    Column {
-                                        Text(warehouse.code, style = MaterialTheme.typography.titleMedium)
-                                        Text(warehouse.description)
+                }
+                Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("ITablet · AlimentosEFA", style = MaterialTheme.typography.headlineSmall)
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (status.isNotBlank()) Text(status)
+                    when (screen) {
+                        "home" -> {
+                            if (active != null) {
+                                Text("Inventario pendiente", style = MaterialTheme.typography.titleLarge)
+                                Text("Responsable: ${active!!.responsible}")
+                                Text("Almacén: ${active!!.warehouse}")
+                                Text("Inicio: ${date(active!!.startedAt)}")
+                                Button(onClick = { refresh(); screen = "inventory" }) { Text("Continuar inventario") }
+                            } else {
+                                Text("¿Quién realizará el inventario?", style = MaterialTheme.typography.titleMedium)
+                                OutlinedTextField(responsible, { responsible = it }, label = { Text("Nombre completo") })
+                                Button(onClick = { camera.launch(null) }) { Text("Tomar fotografía obligatoria") }
+                                Text(if (photoPath.isNotBlank()) "Fotografía capturada" else "Fotografía pendiente")
+                                Button(enabled = responsible.isNotBlank() && photoPath.isNotBlank(), onClick = { screen = "setup" }) {
+                                    Text("Continuar")
+                                }
+                            }
+                            OutlinedButton(onClick = { refresh(); screen = "history" }) { Text("Consulta de inventarios anteriores") }
+                        }
+                        "setup" -> {
+                            Text("Conexiones del dispositivo", style = MaterialTheme.typography.titleLarge)
+                            Text(msalStatus)
+                            Button(enabled = msalApp != null, onClick = { signInMicrosoft() }) { Text("Iniciar sesión Microsoft 365") }
+                            OutlinedTextField(sapUser, { sapUser = it }, label = { Text("Usuario SAP") })
+                            OutlinedTextField(sapPassword, { sapPassword = it }, label = { Text("Contraseña SAP") }, visualTransformation = PasswordVisualTransformation())
+                            if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                                Row { Checkbox(trustCertificate, { trustCertificate = it }); Text("Aceptar certificado SAP vencido (solo pruebas)") }
+                            }
+                            Button(enabled = !busy && sapUser.isNotBlank() && sapPassword.isNotBlank(),
+                                onClick = { loginSap(sapUser, sapPassword, trustCertificate) { sapPassword = ""; screen = "warehouse" } }) {
+                                Text("Conectar y consultar almacenes")
+                            }
+                            Text(sapStatus)
+                        }
+                        "warehouse" -> {
+                            Text("Seleccionar almacén", style = MaterialTheme.typography.titleLarge)
+                            LazyColumn(Modifier.weight(1f)) {
+                                items(warehouses, key = { it.code }) { w ->
+                                    Row(Modifier.fillMaxWidth().clickable { warehouse = w.code }.padding(8.dp)) {
+                                        RadioButton(warehouse == w.code, onClick = { warehouse = w.code })
+                                        Text("${w.code} · ${w.description}")
                                     }
                                 }
-                                HorizontalDivider()
+                            }
+                            Button(enabled = warehouse.isNotBlank() && !busy, onClick = {
+                                try {
+                                    val w = warehouses.first { it.code == warehouse }
+                                    store.start(responsible, photoPath, w.code, w.description)
+                                    refresh(); screen = "inventory"
+                                    download(warehouse)
+                                } catch (e: Exception) { status = "No se pudo iniciar: ${e.message}" }
+                            }) { Text("Iniciar y descargar inventario actual") }
+                        }
+                        "inventory" -> {
+                            val inv = active
+                            if (inv != null) {
+                                Text("Responsable: ${inv.responsible} · Almacén: ${inv.warehouse}")
+                                Text("Inicio: ${date(inv.startedAt)}")
+                                Text("Consulta SAP: ${date(inv.queryStartedAt)} — ${date(inv.queryFinishedAt)}")
+                                Text("Lotes: ${rows.size} · Contados: ${rows.count { it.has("CountedQty") }}")
+                                if (rows.isEmpty()) {
+                                    Text("Aún no hay existencias guardadas.")
+                                    Button(enabled = !busy, onClick = { screen = "setup"; status = "Reconecta SAP para descargar el inventario pendiente." }) { Text("Conectar SAP") }
+                                }
+                                if (selectedRow == null) {
+                                    LazyColumn(Modifier.weight(1f)) {
+                                        items(rows, key = { it.getString("ItemCode") + "|" + it.getString("BatchNumber") }) { row ->
+                                            Column(Modifier.fillMaxWidth().clickable {
+                                                selectedRow = row
+                                                qty = if (row.has("CountedQty")) row.getDouble("CountedQty").toString() else ""
+                                                pieces = if (row.has("Pieces")) row.getDouble("Pieces").toString() else ""
+                                            }.padding(8.dp)) {
+                                                Text("${row.optString("ItemCode")} · ${row.optString("ItemName")}")
+                                                Text("Lote: ${row.optString("BatchNumber")} · SAP: ${row.optDouble("InStock")}")
+                                                Text(if (row.has("CountedQty")) "Contado: ${row.optDouble("CountedQty")} · Piezas: ${row.optDouble("Pieces")}" else "Recontar")
+                                                HorizontalDivider()
+                                            }
+                                        }
+                                    }
+                                    Button(enabled = rows.isNotEmpty() && rows.all { it.has("CountedQty") } && !busy,
+                                        onClick = {
+                                            try { store.finish(inv.id); refresh(); screen = "home"; responsible = ""; photoPath = ""; status = "Inventario finalizado y guardado en historial. Envío de correo pendiente." }
+                                            catch (e: Exception) { status = "No se pudo finalizar: ${e.message}" }
+                                        }) { Text("Finalizar inventario") }
+                                    OutlinedButton(onClick = { screen = "home" }) { Text("Guardar y salir") }
+                                } else {
+                                    val row = selectedRow!!
+                                    Text("Recontar ${row.optString("ItemCode")} · Lote ${row.optString("BatchNumber")}")
+                                    OutlinedTextField(qty, { qty = it }, label = { Text("Cantidad (kg)") })
+                                    OutlinedTextField(pieces, { pieces = it }, label = { Text("Piezas") })
+                                    Button(enabled = qty.toDoubleOrNull() != null && pieces.toDoubleOrNull() != null,
+                                        onClick = {
+                                            try {
+                                                store.count(inv.id, row.getString("ItemCode"), row.getString("BatchNumber"), qty.toDouble(), pieces.toDouble())
+                                                selectedRow = null; refresh()
+                                            } catch (e: Exception) { status = "Error al guardar: ${e.message}" }
+                                        }) { Text("Contado") }
+                                    OutlinedButton(onClick = { selectedRow = null }) { Text("Cancelar") }
+                                }
                             }
                         }
-                        Button(onClick = { selectedWarehouseCode?.let { code -> confirmedWarehouseCode = code; downloadInventory(code) } }, enabled = selectedWarehouseCode != null) {
-                            Text("Confirmar almacén")
+                        "history" -> {
+                            Text("Inventarios anteriores · Solo consulta", style = MaterialTheme.typography.titleLarge)
+                            LazyColumn(Modifier.weight(1f)) {
+                                items(history, key = { it.id }) { inv ->
+                                    Column(Modifier.fillMaxWidth().clickable { selectedHistory = inv; screen = "detail" }.padding(10.dp)) {
+                                        Text("${date(inv.finishedAt)} · ${inv.responsible}")
+                                        Text("${inv.warehouse} · ${inv.warehouseName}")
+                                        HorizontalDivider()
+                                    }
+                                }
+                            }
+                            OutlinedButton(onClick = { screen = "home" }) { Text("Volver") }
                         }
-                        confirmedWarehouseCode?.let { code ->
-                            val selected = sapWarehouses.firstOrNull { it.code == code }
-                            Text("Almacén confirmado: $code — ${selected?.description.orEmpty()}")
+                        "detail" -> {
+                            selectedHistory?.let { inv ->
+                                Text("Resumen · Solo lectura", style = MaterialTheme.typography.titleLarge)
+                                Text("Responsable: ${inv.responsible}")
+                                Text("Fotografía registrada: ${if (File(inv.photoPath).exists()) "Sí" else "No disponible"}")
+                                Text("Almacén: ${inv.warehouse} · ${inv.warehouseName}")
+                                Text("Inicio: ${date(inv.startedAt)}")
+                                Text("Fin: ${date(inv.finishedAt)}")
+                                val saved = remember(inv.id) { store.rows(inv.id) }
+                                Text("Lotes: ${saved.size} · Diferencias: ${saved.count { it.has("CountedQty") && it.optDouble("CountedQty") != it.optDouble("InStock") }}")
+                                LazyColumn(Modifier.weight(1f)) {
+                                    items(saved) { row ->
+                                        Text("${row.optString("ItemCode")} · ${row.optString("BatchNumber")} · SAP ${row.optDouble("InStock")} · Conteo ${row.optDouble("CountedQty")}")
+                                        HorizontalDivider()
+                                    }
+                                }
+                            }
+                            OutlinedButton(onClick = { screen = "history" }) { Text("Volver al historial") }
                         }
-                        Text("Almacenes disponibles: ${sapWarehouses.size}")
-                        return@Column
                     }
-                    Text("Acceso SAP Business One")
-                    OutlinedTextField(value = user, onValueChange = { user = it }, label = { Text("Usuario SAP") })
-                    OutlinedTextField(value = password, onValueChange = { password = it },
-                        label = { Text("Contraseña") }, visualTransformation = PasswordVisualTransformation())
-                    if (debugBuild) {
-                        Text("Advertencia: el certificado SAP está vencido. Autorizarlo solo para esta prueba permite enviar credenciales a un destino cuya identidad se comprueba por huella SHA-256, pero sin validar vigencia ni emisor. No usar en producción.")
-                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            Checkbox(checked = allowSapCertificate, onCheckedChange = { allowSapCertificate = it })
-                            Text("Confío en este certificado SAP para la prueba")
-                        }
-                    }
-                    Button(onClick = { loginSap(user, password, allowSapCertificate) { password = "" } }, enabled = !sapBusy && user.isNotBlank() && password.isNotBlank()) {
-                        Text(if (sapBusy) "Conectando..." else "Ingresar SAP")
-                    }
-                    Text(sapStatus)
-                    HorizontalDivider()
-                    Text("Microsoft 365", style = MaterialTheme.typography.titleMedium)
-                    Text(msalStatus)
-                    if (signedInAccount != null) Text("Cuenta: ${signedInAccount}")
-                    Button(
-                        enabled = msalApp != null && !msalBusy,
-                        onClick = { signInMicrosoft() }
-                    ) {
-                        Text(if (msalBusy) "Iniciando sesión..." else "Iniciar sesión Microsoft 365")
-                    }
-                    Text("La prueba solo autentica. No envía correos ni guarda tokens en el código.")
                 }
             }
         }
     }
-
-    private fun loginSap(user: String, password: String, allowPinnedExpiredCertificate: Boolean, onSuccess: () -> Unit) {
-        if (sapBusy) return
-        sapBusy = true
-        sapStatus = "Conectando con SAP..."
-        Thread {
-            try {
-                val client = SapServiceLayerClient(context = applicationContext, allowPinnedExpiredCertificate = allowPinnedExpiredCertificate)
-                client.login("AlimentosEFA", user, password)
-                val warehouses = client.getWarehouses()
-                val values = org.json.JSONObject(warehouses).getJSONArray("value")
-                val loaded = (0 until values.length()).map { index ->
-                    val item = values.getJSONObject(index)
-                    SapWarehouse(item.getString("WarehouseCode"), item.optString("WarehouseName"))
-                }.sortedBy { it.code }
-                runOnUiThread {
-                    onSuccess()
-                    selectedWarehouseCode = null
-                    confirmedWarehouseCode = null
-                    sapWarehouses = loaded
-                    sapStatus = "Conexión SAP correcta. Almacenes disponibles: ${loaded.size}"
-                }
-                activeSapClient = client
-            } catch (e: Exception) {
-                val message = if (e is SSLHandshakeException ||
-                    e.cause is java.security.cert.CertificateException ||
-                    e.message?.contains("certificate", ignoreCase = true) == true) {
-                    "No se pudo validar el certificado HTTPS de SAP."
-                } else {
-                    "Error de conexión SAP: ${e.javaClass.simpleName}: ${e.message?.take(120) ?: "sin detalle"}"
-                }
-                runOnUiThread { sapStatus = message }
-            } finally {
-                runOnUiThread { sapBusy = false }
-            }
-        }.start()
-    }
-
-    private fun downloadInventory(warehouseCode: String) {
-        if (downloadBusy) return
-        val client = activeSapClient
-        if (client == null) {
-            downloadStatus = "La sesión SAP no está disponible. Vuelve a iniciar sesión."
-            return
-        }
-        downloadBusy = true
-        downloadedStock = emptyList()
-        downloadStatus = "Consultando artículos y existencias en SAP..."
-        Thread {
-            try {
-                val stock = client.downloadWarehouseStock(warehouseCode) { count ->
-                    runOnUiThread { downloadStatus = "Consultando artículos: $count con existencia" }
-                }
-                val names = stock.associate { it.getString("ItemCode") to it.optString("ItemName") }
-                val batches = client.downloadBatchStock(warehouseCode) { count ->
-                    runOnUiThread { downloadStatus = "Consultando lotes con existencia: $count" }
-                }
-                val matched = batches.map { batch ->
-                    JSONObject(batch.toString()).put("ItemName", names[batch.getString("ItemCode")] ?: "")
-                }
-                runOnUiThread {
-                    downloadedStock = matched
-                    downloadStatus = "Consulta SAP terminada: ${matched.size} lotes con existencia distinta de cero. Sin guardar todavía en el dispositivo."
-                }
-            } catch (e: Exception) {
-                runOnUiThread { downloadStatus = "Error de descarga SAP: ${e.message?.take(180) ?: e.javaClass.simpleName}" }
-            } finally {
-                try { client.logout() } catch (_: Exception) {}
-                activeSapClient = null
-                runOnUiThread { downloadBusy = false }
-            }
-        }.start()
-    }
-
     private fun signInMicrosoft() {
         val app = msalApp ?: return
-        msalBusy = true
-        msalStatus = "Abriendo inicio de sesión..."
-        app.acquireToken(
-            this,
-            arrayOf(EntraConfig.MAIL_SEND_SCOPE, "User.Read"),
+        app.acquireToken(this, arrayOf(EntraConfig.MAIL_SEND_SCOPE, "User.Read"),
             object : AuthenticationCallback {
-                override fun onSuccess(authenticationResult: IAuthenticationResult) {
-                    signedInAccount = authenticationResult.account.username
-                    msalStatus = "Autenticación Microsoft 365 correcta"
-                    msalBusy = false
+                override fun onSuccess(result: IAuthenticationResult) { msalStatus = "Microsoft 365: ${result.account.username}" }
+                override fun onError(exception: MsalException) { msalStatus = "Microsoft 365: ${exception.errorCode}" }
+                override fun onCancel() { msalStatus = "Autenticación cancelada" }
+            })
+    }
+    private fun loginSap(user: String, password: String, pinned: Boolean, onSuccess: () -> Unit) {
+        if (busy) return
+        busy = true
+        Thread {
+            try {
+                val client = SapServiceLayerClient(context = applicationContext, allowPinnedExpiredCertificate = pinned)
+                client.login("AlimentosEFA", user, password)
+                val array = JSONObject(client.getWarehouses()).getJSONArray("value")
+                val loaded = (0 until array.length()).map {
+                    val w = array.getJSONObject(it)
+                    SapWarehouse(w.getString("WarehouseCode"), w.optString("WarehouseName"))
                 }
-
-                override fun onError(exception: MsalException) {
-                    msalStatus = "Error de autenticación: ${exception.errorCode}"
-                    msalBusy = false
+                sapClient = client
+                runOnUiThread {
+                    warehouses = loaded
+                    sapStatus = "Conectado: ${loaded.size} almacenes"
+                    onSuccess()
                 }
-
-                override fun onCancel() {
-                    msalStatus = "Inicio de sesión cancelado"
-                    msalBusy = false
+            } catch (e: Exception) {
+                runOnUiThread { sapStatus = "Error SAP: ${e.message?.take(160)}" }
+            } finally { runOnUiThread { busy = false } }
+        }.start()
+    }
+    private fun download(warehouse: String) {
+        val client = sapClient ?: run { status = "Conecta SAP para descargar"; return }
+        val id = active?.id ?: return
+        busy = true
+        val started = System.currentTimeMillis()
+        status = "Consultando existencias actuales SAP..."
+        Thread {
+            try {
+                val stock = client.downloadWarehouseStock(warehouse) { n ->
+                    runOnUiThread { status = "Artículos PT con existencia: $n" }
                 }
+                val names = stock.associate { it.getString("ItemCode") to it.optString("ItemName") }
+                val allowed = names.keys
+                val batches = client.downloadBatchStock(warehouse) { n ->
+                    runOnUiThread { status = "Lotes consultados: $n" }
+                }.filter { it.optString("ItemCode") in allowed }
+                    .map { JSONObject(it.toString()).put("ItemName", names[it.getString("ItemCode")] ?: "") }
+                store.saveSnapshot(id, batches, started, System.currentTimeMillis())
+                runOnUiThread { refresh(); status = "Existencias guardadas localmente: ${batches.size} lotes" }
+            } catch (e: Exception) {
+                runOnUiThread { status = "Error SAP: ${e.message?.take(160)}. Inventario pendiente; reintentar conexión." }
+            } finally {
+                try { client.logout() } catch (_: Exception) {}
+                sapClient = null
+                runOnUiThread { busy = false }
             }
-        )
+        }.start()
     }
 }
