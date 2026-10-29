@@ -18,7 +18,9 @@ class GraphMailSender(private val http: OkHttpClient = OkHttpClient()) {
         recipient: String,
         subject: String,
         fileName: String,
-        xlsx: ByteArray
+        xlsx: ByteArray,
+        htmlBody: String,
+        inlinePhoto: ByteArray? = null
     ) {
         require(accessToken.isNotBlank())
         require(recipient.isNotBlank() && !recipient.contains('\n') && !recipient.contains('\r'))
@@ -31,11 +33,25 @@ class GraphMailSender(private val http: OkHttpClient = OkHttpClient()) {
             .put("name", fileName)
             .put("contentType", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             .put("contentBytes", Base64.getEncoder().encodeToString(xlsx))
+        val attachments = JSONArray().put(attachment)
+        if (inlinePhoto != null) {
+            require(inlinePhoto.size <= 2 * 1024 * 1024) { "Fotografía demasiado grande para el correo" }
+            attachments.put(JSONObject()
+                .put("@odata.type", "#microsoft.graph.fileAttachment")
+                .put("name", "responsable.jpg")
+                .put("contentType", "image/jpeg")
+                .put("contentBytes", Base64.getEncoder().encodeToString(inlinePhoto))
+                .put("isInline", true)
+                .put("contentId", "responsable-itablet"))
+        }
+        require(xlsx.size + (inlinePhoto?.size ?: 0) <= 3 * 1024 * 1024) {
+            "Los archivos exceden el tamaño permitido para este envío"
+        }
         val message = JSONObject()
             .put("subject", subject)
-            .put("body", JSONObject().put("contentType", "Text").put("content", "Reporte de inventario ITablet adjunto."))
+            .put("body", JSONObject().put("contentType", "HTML").put("content", htmlBody))
             .put("toRecipients", JSONArray().put(JSONObject().put("emailAddress", JSONObject().put("address", recipient))))
-            .put("attachments", JSONArray().put(attachment))
+            .put("attachments", attachments)
         val payload = JSONObject().put("message", message).put("saveToSentItems", true)
         val request = Request.Builder()
             .url("https://graph.microsoft.com/v1.0/me/sendMail")
