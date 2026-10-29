@@ -202,7 +202,7 @@ class MainActivity : ComponentActivity() {
                                 } else {
                                     val row = selectedRow!!
                                     Text("Recontar ${row.optString("ItemCode")}")
-                                    OutlinedTextField(qty, { if (it.isEmpty() || it.matches(Regex("""\\d*(?:[.,]\\d*)?"""))) qty = it }, label = { Text("Cantidad (kg)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                                    OutlinedTextField(qty, { if (it.isEmpty() || it.matches(Regex("""[0-9]*(?:[.,][0-9]*)?"""))) qty = it }, label = { Text("Cantidad (kg)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                                     OutlinedTextField(pieces, { if (it.isEmpty() || it.all(Char::isDigit)) pieces = it }, label = { Text("Piezas") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
                                     Button(enabled = qty.replace(",", ".").toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true && pieces.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true,
                                         onClick = {
