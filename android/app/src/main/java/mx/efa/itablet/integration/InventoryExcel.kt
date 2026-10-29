@@ -44,14 +44,6 @@ object InventoryExcel {
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
 </Relationships>""")
             val data = mutableListOf<List<Any?>>()
-            data.add(listOf("Inventario ITablet", inv.id))
-            data.add(listOf("Responsable", inv.responsible))
-            data.add(listOf("Almacén", inv.warehouse, inv.warehouseName))
-            data.add(listOf("Inicio", date(inv.startedAt)))
-            data.add(listOf("Consulta SAP inicio", date(inv.queryStartedAt)))
-            data.add(listOf("Consulta SAP fin", date(inv.queryFinishedAt)))
-            data.add(listOf("Finalización", date(inv.finishedAt)))
-            data.add(emptyList())
             data.add(listOf("Artículo", "Descripción", "Almacén", "Cantidad SAP (kg)", "Cantidad contada (kg)", "Piezas", "Diferencia (kg)", "Estado"))
             rows.forEach { row ->
                 val counted = row.has("CountedQty")
