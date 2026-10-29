@@ -120,7 +120,7 @@ class InventoryStore(context: Context) : SQLiteOpenHelper(context, "itablet_inve
             if (!c.isNull(p)) put("Pieces", c.getDouble(p))
         })
     } }
-    fun finish(id: Long) {
+    fun finish(id: Long, allowIncomplete: Boolean = false) {
         val db = writableDatabase
         db.beginTransaction()
         try {
@@ -128,7 +128,7 @@ class InventoryStore(context: Context) : SQLiteOpenHelper(context, "itablet_inve
             check(rows(id).isNotEmpty()) { "No hay existencias descargadas" }
             val pending = db.rawQuery("SELECT COUNT(*) FROM stock WHERE inventory_id=? AND counted_at IS NULL", arrayOf(id.toString()))
                 .use { it.moveToFirst(); it.getInt(0) }
-            check(pending == 0) { "Faltan $pending lotes por contar" }
+            check(allowIncomplete || pending == 0) { "Faltan $pending artículos por contar" }
             val now = System.currentTimeMillis()
             db.execSQL("UPDATE inventories SET status='FINISHED',finished_at=?,updated_at=? WHERE id=?",
                 arrayOf(now,now,id))
