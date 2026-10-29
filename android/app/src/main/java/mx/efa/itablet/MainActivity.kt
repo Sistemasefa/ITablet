@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.BitmapFactory
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import com.microsoft.identity.client.*
 import com.microsoft.identity.client.exception.MsalException
 import mx.efa.itablet.data.*
@@ -160,7 +162,7 @@ class MainActivity : ComponentActivity() {
                                 Text("Responsable: ${inv.responsible} · Almacén: ${inv.warehouse}")
                                 Text("Inicio: ${date(inv.startedAt)}")
                                 Text("Consulta SAP: ${date(inv.queryStartedAt)} — ${date(inv.queryFinishedAt)}")
-                                Text("Lotes: ${rows.size} · Contados: ${rows.count { it.has("CountedQty") }}")
+                                Text("Artículos: ${rows.size} · Contados: ${rows.count { it.has("CountedQty") }} · Pendientes: ${rows.count { !it.has("CountedQty") }}")
                                 if (busy && rows.isEmpty()) {
                                     OutlinedButton(onClick = {
                                         cancelDownload = true
@@ -188,6 +190,9 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
                                     }
+                                    if (rows.isNotEmpty() && rows.any { !it.has("CountedQty") }) {
+                                        Text("Para finalizar, cuenta los ${rows.count { !it.has("CountedQty") }} artículos pendientes.", color = MaterialTheme.colorScheme.error)
+                                    }
                                     Button(enabled = rows.isNotEmpty() && rows.all { it.has("CountedQty") } && !busy,
                                         onClick = {
                                             try { store.finish(inv.id); refresh(); screen = "home"; responsible = ""; photoPath = ""; status = "Inventario finalizado y guardado en historial. Envío de correo pendiente." }
@@ -197,12 +202,12 @@ class MainActivity : ComponentActivity() {
                                 } else {
                                     val row = selectedRow!!
                                     Text("Recontar ${row.optString("ItemCode")}")
-                                    OutlinedTextField(qty, { qty = it }, label = { Text("Cantidad (kg)") })
-                                    OutlinedTextField(pieces, { pieces = it }, label = { Text("Piezas") })
-                                    Button(enabled = qty.toDoubleOrNull() != null && pieces.toDoubleOrNull() != null,
+                                    OutlinedTextField(qty, { if (it.isEmpty() || it.matches(Regex("""\\d*(?:[.,]\\d*)?"""))) qty = it }, label = { Text("Cantidad (kg)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                                    OutlinedTextField(pieces, { if (it.isEmpty() || it.all(Char::isDigit)) pieces = it }, label = { Text("Piezas") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                                    Button(enabled = qty.replace(",", ".").toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true && pieces.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true,
                                         onClick = {
                                             try {
-                                                store.count(inv.id, row.getString("ItemCode"), row.getString("BatchNumber"), qty.toDouble(), pieces.toDouble())
+                                                store.count(inv.id, row.getString("ItemCode"), row.getString("BatchNumber"), qty.replace(",", ".").toDouble(), pieces.toDouble())
                                                 selectedRow = null; refresh()
                                             } catch (e: Exception) { status = "Error al guardar: ${e.message}" }
                                         }) { Text("Contado") }
@@ -234,7 +239,7 @@ class MainActivity : ComponentActivity() {
                                 Text("Inicio: ${date(inv.startedAt)}")
                                 Text("Fin: ${date(inv.finishedAt)}")
                                 val saved = remember(inv.id) { store.rows(inv.id) }
-                                Text("Lotes: ${saved.size} · Diferencias: ${saved.count { it.has("CountedQty") && it.optDouble("CountedQty") != it.optDouble("InStock") }}")
+                                Text("Artículos: ${saved.size} · Diferencias: ${saved.count { it.has("CountedQty") && it.optDouble("CountedQty") != it.optDouble("InStock") }}")
                                 LazyColumn(Modifier.weight(1f)) {
                                     items(saved) { row ->
                                         Text("${row.optString("ItemCode")} · SAP ${row.optDouble("InStock")} · Conteo ${row.optDouble("CountedQty")}")
