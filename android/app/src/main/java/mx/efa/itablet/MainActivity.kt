@@ -143,6 +143,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             }
+                            OutlinedButton(enabled = !busy, onClick = { warehouse = ""; screen = "home"; status = "" }) { Text("Retroceder") }
                             Button(enabled = warehouse.isNotBlank() && !busy, onClick = {
                                 try {
                                     val w = warehouses.first { it.code == warehouse }
