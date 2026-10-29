@@ -86,6 +86,8 @@ class MainActivity : ComponentActivity() {
                 var trustCertificate by remember { mutableStateOf(false) }
                 var warehouse by remember { mutableStateOf("") }
                 var selectedRow by remember { mutableStateOf<JSONObject?>(null) }
+                var showArticleSearch by remember { mutableStateOf(false) }
+                var articleSearch by remember { mutableStateOf("") }
                 var confirmIncompleteFinish by remember { mutableStateOf(false) }
                 var qty by remember { mutableStateOf("") }
                 var pieces by remember { mutableStateOf("") }
@@ -177,8 +179,28 @@ class MainActivity : ComponentActivity() {
                                     Button(enabled = !busy, onClick = { loadWarehouses() }) { Text("Conectar SAP") }
                                 }
                                 if (selectedRow == null) {
+                                    OutlinedButton(onClick = {
+                                        showArticleSearch = !showArticleSearch
+                                        if (!showArticleSearch) articleSearch = ""
+                                    }) { Text(if (showArticleSearch) "Cerrar búsqueda" else "Buscar artículo") }
+                                    if (showArticleSearch) {
+                                        OutlinedTextField(
+                                            value = articleSearch,
+                                            onValueChange = { articleSearch = it },
+                                            label = { Text("Clave o parte de la clave (ej. M001)") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    val filteredRows = if (articleSearch.isBlank()) rows else rows.filter {
+                                        it.optString("ItemCode").contains(articleSearch.trim(), ignoreCase = true)
+                                    }
+                                    if (articleSearch.isNotBlank()) {
+                                        Text("Coincidencias: ${filteredRows.size}")
+                                        if (filteredRows.isEmpty()) Text("No se encontraron artículos con esa clave.")
+                                    }
                                     LazyColumn(Modifier.weight(1f)) {
-                                        items(rows, key = { it.getString("ItemCode") + "|" + it.getString("BatchNumber") }) { row ->
+                                        items(filteredRows, key = { it.getString("ItemCode") + "|" + it.getString("BatchNumber") }) { row ->
                                             Column(Modifier.fillMaxWidth().clickable {
                                                 selectedRow = row
                                                 qty = if (row.has("CountedQty")) row.getDouble("CountedQty").toString() else ""
