@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
                 var photoPath by remember { mutableStateOf("") }
                 var sapUser by remember { mutableStateOf("") }
                 var sapPassword by remember { mutableStateOf("") }
+                var sapDatabase by remember { mutableStateOf("AlimentosEFA") }
                 var trustCertificate by remember { mutableStateOf(false) }
                 var warehouse by remember { mutableStateOf("") }
                 var selectedRow by remember { mutableStateOf<JSONObject?>(null) }
@@ -127,13 +128,14 @@ class MainActivity : ComponentActivity() {
                             Text("SAP: ${if (sapConfigured) "Configurado" else "Pendiente"} · Microsoft 365: ${if (microsoftConfigured) "Configurado" else "Pendiente"}")
                             Text(msalStatus)
                             Button(enabled = msalApp != null, onClick = { signInMicrosoft() }) { Text("Iniciar sesión Microsoft 365") }
+                            OutlinedTextField(sapDatabase, { sapDatabase = it }, label = { Text("Base de datos SAP") })
                             OutlinedTextField(sapUser, { sapUser = it }, label = { Text("Usuario SAP") })
                             OutlinedTextField(sapPassword, { sapPassword = it }, label = { Text("Contraseña SAP") }, visualTransformation = PasswordVisualTransformation())
                             if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
                                 Row { Checkbox(trustCertificate, { trustCertificate = it }); Text("Aceptar certificado SAP vencido (solo pruebas)") }
                             }
-                            Button(enabled = !busy && sapUser.isNotBlank() && sapPassword.isNotBlank(),
-                                onClick = { loginSap(sapUser, sapPassword, trustCertificate) { credentials.saveSap(sapUser, sapPassword, trustCertificate); sapConfigured = true; sapPassword = ""; if (microsoftConfigured) screen = if (active != null) "inventory" else "home" } }) {
+                            Button(enabled = !busy && sapDatabase.isNotBlank() && sapUser.isNotBlank() && sapPassword.isNotBlank(),
+                                onClick = { loginSap(sapDatabase, sapUser, sapPassword, trustCertificate) { credentials.saveSap(sapDatabase, sapUser, sapPassword, trustCertificate); sapConfigured = true; sapPassword = ""; if (microsoftConfigured) screen = if (active != null) "inventory" else "home" } }) {
                                 Text("Conectar y consultar almacenes")
                             }
                             Text(sapStatus)
@@ -386,8 +388,8 @@ class MainActivity : ComponentActivity() {
         Thread {
             try {
                 val client = SapServiceLayerClient(context = applicationContext,
-                    allowPinnedExpiredCertificate = saved.third)
-                client.login("AlimentosEFA", saved.first, saved.second)
+                    allowPinnedExpiredCertificate = saved.pinnedDebugCertificate)
+                client.login(saved.database, saved.user, saved.password)
                 val array = JSONObject(client.getWarehouses()).getJSONArray("value")
                 val loaded = (0 until array.length()).map {
                     val w = array.getJSONObject(it)
@@ -415,13 +417,13 @@ class MainActivity : ComponentActivity() {
                 override fun onCancel() { msalStatus = "Autenticación cancelada" }
             })
     }
-    private fun loginSap(user: String, password: String, pinned: Boolean, onSuccess: () -> Unit) {
+    private fun loginSap(database: String, user: String, password: String, pinned: Boolean, onSuccess: () -> Unit) {
         if (busy) return
         busy = true
         Thread {
             try {
                 val client = SapServiceLayerClient(context = applicationContext, allowPinnedExpiredCertificate = pinned)
-                client.login("AlimentosEFA", user, password)
+                client.login(database, user, password)
                 val array = JSONObject(client.getWarehouses()).getJSONArray("value")
                 val loaded = (0 until array.length()).map {
                     val w = array.getJSONObject(it)

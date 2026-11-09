@@ -60,6 +60,7 @@ class SapServiceLayerClient(
         .build()
 
     companion object {
+        const val BATCH_QUERY_CODE = "itablet_lotes"
         private const val PINNED_CERT_SHA256 =
             "76:C5:76:E0:40:87:B3:A5:97:98:0B:94:13:1E:8D:BB:B6:1F:44:A9:C0:61:27:DC:CF:C7:D4:B1:DC:2E:98:C2"
     }
@@ -80,7 +81,7 @@ class SapServiceLayerClient(
 
     fun getWarehouses(): String {
         val all = org.json.JSONArray()
-        var next: String? = "Warehouses?\$select=WarehouseCode,WarehouseName,Inactive&\$filter=Inactive eq 'tNO'"
+        var next: String? = "Warehouses?\$select=WarehouseCode,WarehouseName,Inactive&\$filter=startswith(WarehouseCode,'ALM') and Inactive eq 'tNO'"
         val visited = mutableSetOf<String>()
         while (next != null) {
             val current = next
@@ -182,6 +183,72 @@ class SapServiceLayerClient(
             }
             onProgress(rows.size)
             val nextLink = page.optString("odata.nextLink").ifBlank { page.optString("@odata.nextLink") }
+            next = if (nextLink.isBlank()) null else nextLink.removePrefix(baseUrl).removePrefix("/")
+        }
+        return rows
+    }
+
+    /**
+     * Lee una consulta SQL registrada en Service Layer y normaliza sus filas
+     * al formato que usa el inventario local. La consulta debe devolver las
+     * columnas ItemCode, ItemName, WarehouseCode, BatchNumber e InStock.
+     *
+     * SAP B1 expone las consultas guardadas como SQLQueries('codigo')/List.
+     * El código se recibe como argumento para no asumir el nombre elegido en
+     * Query Manager. No se usa hasta confirmar que la consulta está publicada
+     * y que el usuario SAP tiene permiso de lectura.
+     */
+    fun downloadBatchStockQuery(
+        queryCode: String = BATCH_QUERY_CODE,
+        warehouseCode: String,
+        onProgress: (Int) -> Unit
+    ): List<JSONObject> {
+        require(queryCode.isNotBlank() && warehouseCode.isNotBlank())
+        val rows = mutableListOf<JSONObject>()
+        val escapedQuery = queryCode.replace("'", "''")
+        val escapedWarehouse = warehouseCode.replace("'", "''")
+        var next: String? = "SQLQueries('$escapedQuery')/List?ParamList='$escapedWarehouse'"
+        val visited = mutableSetOf<String>()
+        while (next != null) {
+            val current = next
+            check(visited.add(current)) { "SAP devolvió una página repetida de SQLQueries" }
+            val url = if (current.startsWith("https://")) current else baseUrl + current.removePrefix("/")
+            require(url.startsWith(baseUrl)) { "Paginación fuera del servidor SAP autorizado" }
+            val page = http.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    throw IllegalStateException("SAP SQLQueries HTTP ${response.code}: ${body.take(200)}")
+                }
+                JSONObject(body)
+            }
+            val values = page.optJSONArray("value")
+                ?: page.optJSONArray("rows")
+                ?: throw IllegalStateException("SAP SQLQueries no devolvió una lista de filas")
+            for (i in 0 until values.length()) {
+                val source = values.getJSONObject(i)
+                val itemCode = source.optString("ItemCode")
+                val itemName = source.optString("ItemName")
+                val sourceWarehouse = source.optString("WarehouseCode")
+                val batch = source.optString("BatchNumber")
+                check(itemCode.isNotBlank() && batch.isNotBlank() && sourceWarehouse.isNotBlank() && source.has("InStock")) {
+                    "SQLQueries debe devolver ItemCode, ItemName, WarehouseCode, BatchNumber e InStock"
+                }
+                check(sourceWarehouse == warehouseCode) {
+                    "SQLQueries devolvió una fila de otro almacén"
+                }
+                val quantity = source.getDouble("InStock")
+                if (quantity != 0.0) {
+                    rows.add(JSONObject()
+                        .put("ItemCode", itemCode)
+                        .put("ItemName", itemName)
+                        .put("WarehouseCode", sourceWarehouse)
+                        .put("BatchNumber", batch)
+                        .put("InStock", quantity))
+                }
+            }
+            onProgress(rows.size)
+            val nextLink = page.optString("odata.nextLink")
+                .ifBlank { page.optString("@odata.nextLink") }
             next = if (nextLink.isBlank()) null else nextLink.removePrefix(baseUrl).removePrefix("/")
         }
         return rows

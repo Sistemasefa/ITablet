@@ -15,3 +15,19 @@
 
 ## Estado
 La pantalla Android inicial es un prototipo sin autenticación operativa. Falta integrar Room, consultas y exportación XLSX.
+
+## Consulta de lotes validada en SQL Server
+
+La consulta de existencias por lote fue validada contra la sociedad `AlimentosEFA`
+con las tablas `OBTQ`, `OBTN` y `OITM`. El almacén de prueba fue `ALMPTTUL` y
+devolvió, entre otros, el artículo `PTAHPU/E032` con lotes `122-26`, `131-26`,
+`281-26` y `362-26`, cada uno con su cantidad.
+
+La app incorpora `downloadBatchStockQuery(queryCode, warehouseCode, ...)` para
+consumir una consulta registrada como `SQLQueries('codigo')/List`. El parámetro
+del almacén se envía mediante `ParamList`, que es el parámetro definido por el
+metadata de Service Layer. El código
+predeterminado configurado en la app es `itablet_lotes`. La consulta
+publicada debe devolver exactamente `ItemCode`, `ItemName`, `WarehouseCode`,
+`BatchNumber` e `InStock`. El código de la consulta aún debe confirmarse en
+Service Layer antes de activar la descarga por lotes en la pantalla principal.

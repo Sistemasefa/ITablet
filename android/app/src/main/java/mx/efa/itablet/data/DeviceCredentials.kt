@@ -11,6 +11,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Device-only encrypted SAP credentials; Microsoft tokens are owned by MSAL. */
+data class SapCredentials(val database: String, val user: String, val password: String, val pinnedDebugCertificate: Boolean)
 class DeviceCredentials(context: Context) {
     private val prefs = context.getSharedPreferences("device_setup", Context.MODE_PRIVATE)
     private val alias = "itablet_sap_aes"
@@ -36,16 +37,18 @@ class DeviceCredentials(context: Context) {
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
         return String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
     }
-    fun saveSap(user: String, password: String, pinnedDebugCertificate: Boolean) {
-        require(user.isNotBlank() && password.isNotBlank())
-        prefs.edit().putString("sap_user", encrypt(user))
+    fun saveSap(database: String, user: String, password: String, pinnedDebugCertificate: Boolean) {
+        require(database.isNotBlank() && user.isNotBlank() && password.isNotBlank())
+        prefs.edit().putString("sap_database", database.trim())
+            .putString("sap_user", encrypt(user))
             .putString("sap_password", encrypt(password))
             .putBoolean("sap_pinned_debug", pinnedDebugCertificate).apply()
     }
-    fun sap(): Triple<String, String, Boolean>? = try {
+    fun sap(): SapCredentials? = try {
+        val database = prefs.getString("sap_database", "AlimentosEFA") ?: "AlimentosEFA"
         val u = prefs.getString("sap_user", null) ?: return null
         val p = prefs.getString("sap_password", null) ?: return null
-        Triple(decrypt(u), decrypt(p), prefs.getBoolean("sap_pinned_debug", false))
+        SapCredentials(database, decrypt(u), decrypt(p), prefs.getBoolean("sap_pinned_debug", false))
     } catch (_: Exception) { null }
     var microsoftConfigured: Boolean
         get() = prefs.getBoolean("microsoft_configured", false)

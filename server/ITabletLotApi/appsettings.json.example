@@ -1,0 +1,5 @@
+{
+  "SqlServer": "SVERP",
+  "ApiKey": "CAMBIAR_POR_UNA_CLAVE_LARGA_Y_ALEATORIA",
+  "Urls": "https://0.0.0.0:5080"
+}
