@@ -98,7 +98,17 @@ sealed class LotRepository(IConfiguration configuration)
         var candidates = new List<string>();
         while (await reader.ReadAsync(cancellationToken)) candidates.Add(reader.GetString(0));
         foreach (var database in candidates)
-            if (await IsSapDatabaseAsync(database, cancellationToken)) result.Add(new { database });
+        {
+            try
+            {
+                if (await IsSapDatabaseAsync(database, cancellationToken)) result.Add(new { database });
+            }
+            catch (SqlException)
+            {
+                // La cuenta del servicio puede no tener acceso a bases ajenas a SAP.
+                // Se omiten sin revelar nombres ni detener la lista de sociedades.
+            }
+        }
         return result;
     }
 
